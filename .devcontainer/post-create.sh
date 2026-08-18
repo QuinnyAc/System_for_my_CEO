@@ -1,55 +1,72 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NEW_ENV=false
 if [[ ! -f .env ]]; then
   cp .env.example .env
-  NEW_ENV=true
 fi
 
 APP_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-18)"
 SESSION_SECRET="$(openssl rand -hex 32)"
 CREDENTIALS_SECRET="$(openssl rand -hex 32)"
+GENERATED_LOGIN=false
 
-python3 - "$APP_PASSWORD" "$SESSION_SECRET" "$CREDENTIALS_SECRET" <<'PY'
-from pathlib import Path
-import sys
+replace_placeholder() {
+  local key="$1"
+  local placeholder="$2"
+  local value="$3"
+  local tmp
+  tmp="$(mktemp)"
+  local replaced=false
 
-password, session_secret, credentials_secret = sys.argv[1:4]
-path = Path('.env')
-lines = path.read_text().splitlines()
-updates = {}
-if any(line == 'APP_PASSWORD=GENERATE_ON_SETUP' for line in lines):
-    updates['APP_PASSWORD'] = password
-if any(line == 'SESSION_SECRET=GENERATE_ON_SETUP' for line in lines):
-    updates['SESSION_SECRET'] = session_secret
-if any(line == 'CREDENTIALS_SECRET=GENERATE_ON_SETUP' for line in lines):
-    updates['CREDENTIALS_SECRET'] = credentials_secret
-out=[]
-for line in lines:
-    key=line.split('=',1)[0] if '=' in line else ''
-    out.append(f'{key}={updates[key]}' if key in updates else line)
-path.write_text('\n'.join(out)+'\n')
-PY
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${key}=${placeholder}" ]]; then
+      printf '%s=%s\n' "$key" "$value" >> "$tmp"
+      replaced=true
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < .env
+
+  mv "$tmp" .env
+  [[ "$replaced" == "true" ]]
+}
+
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  local tmp
+  tmp="$(mktemp)"
+  local found=false
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${key}="* ]]; then
+      printf '%s=%s\n' "$key" "$value" >> "$tmp"
+      found=true
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < .env
+
+  if [[ "$found" != "true" ]]; then
+    printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  fi
+
+  mv "$tmp" .env
+}
+
+if replace_placeholder "APP_PASSWORD" "GENERATE_ON_SETUP" "$APP_PASSWORD"; then
+  GENERATED_LOGIN=true
+fi
+replace_placeholder "SESSION_SECRET" "GENERATE_ON_SETUP" "$SESSION_SECRET" || true
+replace_placeholder "CREDENTIALS_SECRET" "GENERATE_ON_SETUP" "$CREDENTIALS_SECRET" || true
 
 if [[ "${CODESPACES:-false}" == "true" ]]; then
   WEB_URL="https://${CODESPACE_NAME}-3100.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
-  python3 - "$WEB_URL" <<'PY'
-from pathlib import Path
-import sys
-web_url=sys.argv[1]
-path=Path('.env')
-lines=path.read_text().splitlines()
-updates={'PUBLIC_WEB_URL':web_url,'CORS_ORIGINS':web_url}
-out=[]
-for line in lines:
-    key=line.split('=',1)[0] if '=' in line else ''
-    out.append(f'{key}={updates[key]}' if key in updates else line)
-path.write_text('\n'.join(out)+'\n')
-PY
+  set_env_value "PUBLIC_WEB_URL" "$WEB_URL"
+  set_env_value "CORS_ORIGINS" "$WEB_URL"
 fi
 
-if [[ "$NEW_ENV" == "true" ]]; then
+if [[ "$GENERATED_LOGIN" == "true" ]]; then
   echo "Media Ops initial login created."
   echo "Username: admin"
   echo "Password: ${APP_PASSWORD}"
