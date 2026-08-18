@@ -13,6 +13,7 @@ random_hex() {
 APP_PASSWORD="$(random_hex 12)"
 SESSION_SECRET="$(random_hex 32)"
 CREDENTIALS_SECRET="$(random_hex 32)"
+COLLECTOR_TOKEN="$(random_hex 24)"
 GENERATED_LOGIN=false
 
 replace_placeholder() {
@@ -67,6 +68,7 @@ if replace_placeholder "APP_PASSWORD" "GENERATE_ON_SETUP" "$APP_PASSWORD"; then
 fi
 replace_placeholder "SESSION_SECRET" "GENERATE_ON_SETUP" "$SESSION_SECRET" || true
 replace_placeholder "CREDENTIALS_SECRET" "GENERATE_ON_SETUP" "$CREDENTIALS_SECRET" || true
+replace_placeholder "COLLECTOR_TOKEN" "GENERATE_ON_SETUP" "$COLLECTOR_TOKEN" || true
 
 if [[ -n "${CODESPACE_NAME:-}" ]]; then
   PORT_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
