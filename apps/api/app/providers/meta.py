@@ -8,6 +8,7 @@ import httpx
 META_SCOPES = [
     "pages_show_list",
     "pages_read_engagement",
+    "pages_read_user_content",
     "read_insights",
     "instagram_basic",
     "instagram_manage_insights",
