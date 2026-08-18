@@ -168,10 +168,10 @@ export default function AccountsPage() {
       {error ? <div className="error">{error}</div> : null}
 
       <section className="card">
-        <div className="sectionTitle"><h2>添加账号</h2><span>Independent account</span></div>
+        <div className="sectionTitle"><h2>添加账号</h2><span>Account record</span></div>
         <form className="form" onSubmit={submit}>
           <div className="field"><label>平台</label><select className="select" value={platformId} onChange={(e) => setPlatformId(e.target.value)}>{platforms.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-          <div className="field"><label>账号名称</label><input className="input" required value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 ZenoMinerals Main" /></div>
+          <div className="field"><label>账号名称</label><input className="input" required value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 Main Account" /></div>
           <div className="field"><label>Handle / 用户名</label><input className="input" value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="@username" /></div>
           <div className="field"><label>平台内部 ID</label><input className="input" value={externalId} onChange={(e) => setExternalId(e.target.value)} placeholder="可留空，授权后自动识别；YouTube API Key 模式可填 Channel ID" /></div>
           <div className="field full"><label>主页链接</label><input className="input" type="url" value={profileUrl} onChange={(e) => setProfileUrl(e.target.value)} placeholder="https://..." /></div>
