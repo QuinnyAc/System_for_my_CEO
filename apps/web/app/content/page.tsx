@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { api, formatNumber } from "@/lib/api";
 import type { ContentMetric, Platform, PublishedContent, SocialAccount } from "@/lib/types";
 
+const metricKeys = ["views", "likes", "saves", "comments", "shares"] as const;
+type MetricKey = typeof metricKeys[number];
+
 function contentTypeLabel(type: string, platformSlug?: string) {
   if (platformSlug === "youtube") return type === "short" ? "YouTube 短视频" : "YouTube 长视频";
   if (platformSlug === "instagram") return type === "short" ? "Instagram Reel" : "Instagram Post";
@@ -15,15 +18,25 @@ function contentTypeLabel(type: string, platformSlug?: string) {
   return "Video";
 }
 
-function metricText(metric: ContentMetric, platformSlug?: string) {
-  const dash = "—";
-  const contradictoryZeroViews = metric.views === 0 && (metric.likes > 0 || metric.comments > 0 || metric.saves > 0 || metric.shares > 0);
-  const views = platformSlug === "pinterest" || contradictoryZeroViews ? dash : formatNumber(metric.views);
-  const likes = platformSlug === "pinterest" ? dash : formatNumber(metric.likes);
-  const saves = platformSlug === "pinterest" ? formatNumber(metric.saves) : dash;
-  const comments = formatNumber(metric.comments);
-  const shares = platformSlug === "facebook" ? formatNumber(metric.shares) : dash;
-  return `${views} 播放/浏览 · ${likes} 点赞 · ${saves} 收藏 · ${comments} 评论 · ${shares} 分享`;
+function metricKnown(metric: ContentMetric, key: MetricKey) {
+  const extra = metric.extra_metrics || {};
+  const known = extra.known;
+  if (known && typeof known === "object" && typeof (known as Record<string, unknown>)[key] === "boolean") {
+    return Boolean((known as Record<string, unknown>)[key]);
+  }
+  const available = extra.available;
+  if (available && typeof available === "object" && typeof (available as Record<string, unknown>)[key] === "boolean") {
+    return Boolean((available as Record<string, unknown>)[key]);
+  }
+  return metric[key] > 0;
+}
+
+function metricValue(metric: ContentMetric, key: MetricKey) {
+  return metricKnown(metric, key) ? formatNumber(metric[key]) : "—";
+}
+
+function metricText(metric: ContentMetric) {
+  return `${metricValue(metric, "views")} 播放/浏览 · ${metricValue(metric, "likes")} 点赞 · ${metricValue(metric, "saves")} 收藏 · ${metricValue(metric, "comments")} 评论 · ${metricValue(metric, "shares")} 分享`;
 }
 
 export default function ContentPage() {
@@ -44,9 +57,14 @@ export default function ContentPage() {
     setAccounts(a);
     setItems(c);
     setMetrics(m);
+    setError("");
   }
 
-  useEffect(() => { load().catch((e) => setError(e.message)); }, []);
+  useEffect(() => {
+    load().catch((e) => setError(e instanceof Error ? e.message : "读取失败"));
+    const timer = window.setInterval(() => load().catch(() => null), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const amap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const pmap = useMemo(() => new Map(platforms.map((p) => [p.id, p])), [platforms]);
@@ -54,8 +72,12 @@ export default function ContentPage() {
 
   async function remove(id: string) {
     if (!confirm("确定删除这条内容和所有历史数据吗？")) return;
-    await api<void>(`/content/${id}`, { method: "DELETE" });
-    await load();
+    try {
+      await api<void>(`/content/${id}`, { method: "DELETE" });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除失败");
+    }
   }
 
   return (
@@ -64,26 +86,26 @@ export default function ContentPage() {
         <div>
           <div className="eyebrow">Published Content</div>
           <h1>内容数据</h1>
-          <p>账号添加后，系统会自动发现登记之后发布的新作品，并在这里持续更新公开可见的数据。平台未公开或暂未成功读取的指标显示为 —。</p>
+          <p>这里只显示已登记的作品及其公开可见数据。平台未公开或尚未成功读取的指标显示为 —，不会再用 0 代替未知值。</p>
         </div>
       </header>
       {error ? <div className="error">{error}</div> : null}
 
       <section className="section">
         <div className="sectionTitle"><h2>内容列表</h2><span>{items.length}</span></div>
-        {items.length === 0 ? <div className="empty">目前还没有登记之后发布的新作品。新作品被发现后会自动出现在这里。</div> : (
+        {items.length === 0 ? <div className="empty">目前还没有登记之后发现的新作品。新作品被发现后会自动出现在这里。</div> : (
           <div className="dataList">
             {items.map((item) => {
-              const m = mmap.get(item.id);
+              const metric = mmap.get(item.id);
               const account = amap.get(item.account_id);
               const platform = account ? pmap.get(account.platform_id) : undefined;
               return (
                 <div className="row" key={item.id} style={{ alignItems: "flex-start" }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="rowTitle">{item.title} <span className="pill">{contentTypeLabel(item.content_type, platform?.slug)}</span></div>
-                    <div className="rowMeta">{account?.name} · {platform?.name || "Platform"}</div>
-                    {m ? <div className="rowMeta" style={{ marginTop: 6 }}>{metricText(m, platform?.slug)}</div> : <div className="rowMeta" style={{ marginTop: 6 }}>等待首次数据快照</div>}
-                    {m ? <div className="rowMeta" style={{ marginTop: 4 }}>最近更新：{new Date(m.captured_at).toLocaleString()}</div> : null}
+                    <div className="rowMeta">{account?.name || "未知账号"} · {platform?.name || "Platform"}</div>
+                    {metric ? <div className="rowMeta" style={{ marginTop: 6 }}>{metricText(metric)}</div> : <div className="rowMeta" style={{ marginTop: 6 }}>等待首次数据快照</div>}
+                    {metric ? <div className="rowMeta" style={{ marginTop: 4 }}>最近更新：{new Date(metric.captured_at).toLocaleString()}</div> : null}
                   </div>
                   <div style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     {item.url ? <a className="button secondary" href={item.url} target="_blank" rel="noreferrer">打开作品</a> : null}
