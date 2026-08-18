@@ -147,3 +147,25 @@ class MonitoredAccount(Base):
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class MonitorFeedState(Base):
+    __tablename__ = "monitor_feed_states"
+    __table_args__ = (UniqueConstraint("monitor_id", "feed_url", name="uq_monitor_feed_state"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    monitor_id: Mapped[UUID] = mapped_column(ForeignKey("monitored_accounts.id", ondelete="CASCADE"), index=True)
+    feed_url: Mapped[str] = mapped_column(Text, nullable=False)
+    initialized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class MonitoredContentSeen(Base):
+    __tablename__ = "monitored_content_seen"
+    __table_args__ = (UniqueConstraint("monitor_id", "url", name="uq_monitored_content_seen"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    monitor_id: Mapped[UUID] = mapped_column(ForeignKey("monitored_accounts.id", ondelete="CASCADE"), index=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    platform: Mapped[str] = mapped_column(String(32), index=True)
+    is_baseline: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
