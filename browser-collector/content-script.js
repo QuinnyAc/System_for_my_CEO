@@ -1,4 +1,4 @@
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 function text(selector) {
   const node = document.querySelector(selector);
@@ -130,6 +130,12 @@ function youtube() {
   const accountName = text("ytd-channel-name a") || text("#channel-name #text") || text("#text-container #text");
   const profileUrl = href ? `${location.origin}${href.split("?")[0]}` : (path.startsWith("/@") ? `${location.origin}/${handle}` : "");
   const followers = parseCount(text("#subscriber-count"));
+  const accountSummary = [
+    meta("description"),
+    meta("og:description"),
+    document.body?.innerText?.slice(0, 8000) || ""
+  ].filter(Boolean).join(" ");
+  const contentCount = countNear(accountSummary, ["videos", "video", "视频"]);
 
   if (!content) {
     return {
@@ -140,7 +146,7 @@ function youtube() {
       account_name: accountName || cleanTitle(document.title),
       handle,
       profile_url: profileUrl || location.href,
-      metrics: { followers },
+      metrics: { followers, content_count: contentCount },
       discovered_urls: youtubeDiscoveredLinks()
     };
   }
@@ -225,6 +231,7 @@ function facebook() {
   const firstSegment = path.split("/").filter(Boolean)[0] || "";
   const handle = ["watch", "reel", "photo.php", "story.php"].includes(firstSegment) ? "" : firstSegment;
   const followers = countNear(description, ["followers", "粉丝"]);
+  const posts = countNear(description, ["posts", "videos", "reels", "帖子", "视频"]);
   if (!content) {
     return {
       platform: "facebook",
@@ -234,7 +241,7 @@ function facebook() {
       account_name: title,
       handle,
       profile_url: location.href,
-      metrics: { followers },
+      metrics: { followers, content_count: posts },
       discovered_urls: facebookDiscoveredLinks()
     };
   }
@@ -263,6 +270,7 @@ function pinterest() {
   const title = cleanTitle(meta("og:title") || document.title);
   const handle = !content && segments.length === 1 ? segments[0] : "";
   const followers = countNear(description, ["followers", "粉丝"]);
+  const pins = countNear(description, ["pins", "pin", "图钉"]);
   if (!content) {
     return {
       platform: "pinterest",
@@ -272,7 +280,7 @@ function pinterest() {
       account_name: title,
       handle,
       profile_url: location.href,
-      metrics: { followers },
+      metrics: { followers, content_count: pins },
       discovered_urls: pinterestDiscoveredLinks()
     };
   }
