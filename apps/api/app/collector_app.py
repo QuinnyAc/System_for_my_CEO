@@ -255,6 +255,34 @@ def platform_for_url(value: str) -> str | None:
     return None
 
 
+def is_content_url(platform: str, value: str) -> bool:
+    raw = value.strip()
+    if not raw:
+        return False
+    candidate = raw if "://" in raw else f"https://{raw}"
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        return False
+    host = parsed.netloc.lower().split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    path = parsed.path.rstrip("/") or "/"
+    parts = [part.lower() for part in path.split("/") if part]
+    query = parse_qs(parsed.query)
+    if platform == "youtube":
+        return host == "youtu.be" or path == "/watch" or bool(parts and parts[0] in {"shorts", "live"})
+    if platform == "instagram":
+        return bool(parts and parts[0] in {"p", "reel", "tv"})
+    if platform == "facebook":
+        if host == "fb.watch" or "story_fbid" in query or "fbid" in query:
+            return True
+        return any(part in {"posts", "videos", "reel", "watch", "photo", "permalink"} for part in parts[1:]) or bool(parts and parts[0] in {"watch", "reel"})
+    if platform == "pinterest":
+        return host == "pin.it" or bool(parts and parts[0] == "pin")
+    return False
+
+
 def normalize_profile_url(platform: str, value: str) -> str:
     normalized = normalize_url(value)
     parsed = urlparse(normalized)
@@ -270,6 +298,11 @@ def normalize_profile_url(platform: str, value: str) -> str:
         if parts and parts[0].lower() not in {"p", "reel", "tv", "explore", "accounts"}:
             path = f"/{parts[0]}"
             query = ""
+    elif platform == "facebook":
+        for suffix in ("/videos", "/reels", "/posts"):
+            if path.endswith(suffix) and len([part for part in path.split("/") if part]) >= 2:
+                path = path[: -len(suffix)]
+                break
     elif platform == "pinterest":
         parts = [part for part in path.split("/") if part]
         if parts and parts[0].lower() != "pin":
@@ -425,6 +458,8 @@ def admin_create_account(payload: AdminAccountCreate, db: Session = Depends(get_
     platform_slug = payload.platform.strip().lower()
     if detected not in PLATFORMS or platform_slug != detected:
         raise HTTPException(status_code=422, detail="主页链接与平台不匹配")
+    if is_content_url(platform_slug, payload.profile_url):
+        raise HTTPException(status_code=422, detail="请填写账号主页地址，不要填写单个作品链接")
     platform = db.scalar(select(Platform).where(Platform.slug == platform_slug))
     if platform is None:
         raise HTTPException(status_code=500, detail="Platform catalog is not initialized")
@@ -445,6 +480,8 @@ def admin_create_account(payload: AdminAccountCreate, db: Session = Depends(get_
         )
         db.add(account)
         db.flush()
+    else:
+        account.name = payload.name.strip()[:160]
 
     monitor = db.scalar(
         select(MonitoredAccount).where(
@@ -465,6 +502,7 @@ def admin_create_account(payload: AdminAccountCreate, db: Session = Depends(get_
         db.add(monitor)
         db.flush()
     else:
+        monitor.name = payload.name.strip()[:160]
         monitor.enabled = True
         monitor.last_error = None
         if payload.machine_name is not None:
@@ -537,6 +575,8 @@ def admin_create_monitor(payload: MonitorCreate, db: Session = Depends(get_db)):
     platform = payload.platform.strip().lower()
     if platform not in PLATFORMS:
         raise HTTPException(status_code=422, detail="不支持的平台")
+    if is_content_url(platform, payload.profile_url):
+        raise HTTPException(status_code=422, detail="请填写账号主页地址，不要填写单个作品链接")
     profile_url = normalize_profile_url(platform, payload.profile_url)
     if platform_for_url(profile_url) != platform:
         raise HTTPException(status_code=422, detail="主页链接与平台不匹配")
@@ -780,7 +820,15 @@ def _find_account_by_profile(db: Session, platform: Platform, profile_url: str) 
 def find_or_create_account(db: Session, payload: CollectorPayload, platform: Platform) -> SocialAccount:
     handle = normalize_handle(payload.handle)
     account: SocialAccount | None = None
-    if payload.external_id:
+    if payload.page_type == "content":
+        existing_content = db.scalar(
+            select(PublishedContent).where(PublishedContent.url == normalize_url(payload.url)).limit(1)
+        )
+        if existing_content is not None:
+            existing_account = db.get(SocialAccount, existing_content.account_id)
+            if existing_account is not None and existing_account.platform_id == platform.id:
+                account = existing_account
+    if account is None and payload.external_id:
         account = db.scalar(
             select(SocialAccount).where(
                 SocialAccount.platform_id == platform.id,
@@ -920,8 +968,6 @@ def find_or_create_content(db: Session, account: SocialAccount, payload: Collect
         db.add(item)
         db.flush()
     else:
-        if item.account_id != account.id:
-            item.account_id = account.id
         if payload.title.strip():
             item.title = payload.title.strip()[:300]
         if payload.content_external_id:
