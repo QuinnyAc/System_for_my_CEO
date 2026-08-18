@@ -1,13 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+const SESSION_COOKIE = "media_ops_hub_session";
+
 export function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   if (path.startsWith("/api/") || path.startsWith("/_next/") || path === "/favicon.ico") return NextResponse.next();
   if (path === "/login") {
-    if (request.cookies.has("zeno_social_ops_session")) return NextResponse.redirect(new URL("/", request.url));
+    if (request.cookies.has(SESSION_COOKIE)) return NextResponse.redirect(new URL("/", request.url));
     return NextResponse.next();
   }
-  if (!request.cookies.has("zeno_social_ops_session")) return NextResponse.redirect(new URL("/login", request.url));
+  if (!request.cookies.has(SESSION_COOKIE)) return NextResponse.redirect(new URL("/login", request.url));
   return NextResponse.next();
 }
 
