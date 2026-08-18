@@ -1,6 +1,7 @@
 from app.collector_app import (
     CollectorPayload,
     PublicMetrics,
+    is_content_url,
     normalize_handle,
     normalize_profile_url,
     normalize_url,
@@ -38,8 +39,9 @@ def test_youtube_profile_tabs_normalize_to_channel_home() -> None:
     assert normalize_profile_url("youtube", "https://www.youtube.com/@creator/videos") == "https://youtube.com/@creator"
 
 
-def test_profile_normalization_keeps_only_account_path_for_instagram_and_pinterest() -> None:
+def test_profile_tabs_normalize_to_account_home() -> None:
     assert normalize_profile_url("instagram", "https://www.instagram.com/creator/reels/") == "https://instagram.com/creator"
+    assert normalize_profile_url("facebook", "https://www.facebook.com/creator/reels/") == "https://facebook.com/creator"
     assert normalize_profile_url("pinterest", "https://www.pinterest.com/creator/_created/") == "https://pinterest.com/creator"
 
 
@@ -47,6 +49,17 @@ def test_platform_detection_supports_short_link_domains() -> None:
     assert platform_for_url("https://youtu.be/abc") == "youtube"
     assert platform_for_url("https://fb.watch/abc") == "facebook"
     assert platform_for_url("https://pin.it/abc") == "pinterest"
+
+
+def test_content_urls_are_not_valid_profile_references() -> None:
+    assert is_content_url("youtube", "https://youtube.com/watch?v=abc") is True
+    assert is_content_url("youtube", "https://youtube.com/@creator") is False
+    assert is_content_url("instagram", "https://instagram.com/reel/abc") is True
+    assert is_content_url("instagram", "https://instagram.com/creator") is False
+    assert is_content_url("facebook", "https://facebook.com/creator/videos/123") is True
+    assert is_content_url("facebook", "https://facebook.com/creator") is False
+    assert is_content_url("pinterest", "https://pinterest.com/pin/123") is True
+    assert is_content_url("pinterest", "https://pinterest.com/creator") is False
 
 
 def test_normalize_handle() -> None:
