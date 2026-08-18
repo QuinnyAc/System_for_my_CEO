@@ -50,7 +50,7 @@ PY
 fi
 
 if [[ "$NEW_ENV" == "true" ]]; then
-  echo "ZenoMinerals initial login created."
+  echo "Media Ops initial login created."
   echo "Username: admin"
   echo "Password: ${APP_PASSWORD}"
   echo "You can read it later from APP_PASSWORD in this repository's local .env file."
