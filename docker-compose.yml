@@ -2,15 +2,15 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-zeno_social_ops}
-      POSTGRES_USER: ${POSTGRES_USER:-zeno_social_ops}
+      POSTGRES_DB: ${POSTGRES_DB:-media_ops_hub}
+      POSTGRES_USER: ${POSTGRES_USER:-media_ops_hub}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local}
     ports:
       - "${POSTGRES_PORT:-55432}:5432"
     volumes:
-      - zeno_social_ops_postgres:/var/lib/postgresql/data
+      - media_ops_hub_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-zeno_social_ops} -d ${POSTGRES_DB:-zeno_social_ops}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-media_ops_hub} -d ${POSTGRES_DB:-media_ops_hub}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -20,13 +20,15 @@ services:
       context: ./apps/api
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-zeno_social_ops}:${POSTGRES_PASSWORD:-change-me-local}@db:5432/${POSTGRES_DB:-zeno_social_ops}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-media_ops_hub}:${POSTGRES_PASSWORD:-change-me-local}@db:5432/${POSTGRES_DB:-media_ops_hub}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3100}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3100}
       APP_USERNAME: ${APP_USERNAME:-admin}
       APP_PASSWORD: ${APP_PASSWORD:-change-me-now}
-      SESSION_SECRET: ${SESSION_SECRET:-development-only-zeno-session-secret}
-      CREDENTIALS_SECRET: ${CREDENTIALS_SECRET:-development-only-zeno-credentials-secret}
+      SESSION_SECRET: ${SESSION_SECRET:-development-only-media-ops-session-secret}
+      CREDENTIALS_SECRET: ${CREDENTIALS_SECRET:-development-only-media-ops-credentials-secret}
+      AUTO_SYNC_ENABLED: ${AUTO_SYNC_ENABLED:-false}
+      AUTO_SYNC_INTERVAL_MINUTES: ${AUTO_SYNC_INTERVAL_MINUTES:-60}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -55,9 +57,9 @@ services:
       - api
     volumes:
       - ./apps/web:/app
-      - zeno_social_ops_web_node_modules:/app/node_modules
+      - media_ops_hub_web_node_modules:/app/node_modules
     command: npm run dev -- --port 3100
 
 volumes:
-  zeno_social_ops_postgres:
-  zeno_social_ops_web_node_modules:
+  media_ops_hub_postgres:
+  media_ops_hub_web_node_modules:
