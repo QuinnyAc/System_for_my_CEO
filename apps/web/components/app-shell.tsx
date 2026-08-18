@@ -7,11 +7,12 @@ import { api } from "@/lib/api";
 
 const nav = [
   ["/", "总览", "Overview"],
+  ["/collector", "公开数据采集", "Public View"],
   ["/accounts", "账号管理", "Accounts"],
   ["/content", "内容数据", "Content"],
   ["/sync", "同步中心", "Sync"],
   ["/analytics", "数据分析", "Analytics"],
-  ["/settings", "API 设置", "Connections"],
+  ["/settings", "高级 API", "Optional"],
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
