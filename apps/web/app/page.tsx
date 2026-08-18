@@ -27,7 +27,7 @@ export default function Dashboard() {
 
   const platformMap = new Map(platforms.map((p) => [p.id, p]));
   return <>
-    <header className="pageHeader"><div><div className="eyebrow">ZenoMinerals · Social Operations</div><h1>运营总览</h1><p>集中查看四个平台的账号规模和内容表现。</p></div><span className="pill">Independent workspace</span></header>
+    <header className="pageHeader"><div><div className="eyebrow">ZenoMinerals · Social Operations</div><h1>运营总览</h1><p>集中查看 YouTube、Instagram、Facebook、Pinterest 的账号规模和内容表现。</p></div></header>
     {error ? <div className="error">{error}</div> : null}
     <div className="grid">
       <div className="card"><div className="metricLabel">账号总数</div><div className="metricValue">{accounts.length}</div><div className="metricMeta">4 个目标平台</div></div>
