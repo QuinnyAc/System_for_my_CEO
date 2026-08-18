@@ -8,7 +8,7 @@ def test_health_auth_and_platform_catalog() -> None:
     with TestClient(app) as client:
         health = client.get("/health")
         assert health.status_code == 200
-        assert health.json()["system"] == "zeno_social_ops"
+        assert health.json()["system"] == "media_ops_hub"
 
         protected = client.get("/api/v1/platforms")
         assert protected.status_code == 401
