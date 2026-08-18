@@ -5,6 +5,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store"
   });
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+      window.location.assign("/login");
+    }
     let message = `Request failed (${response.status})`;
     try {
       const body = await response.json();

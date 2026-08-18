@@ -9,19 +9,22 @@ fi
 
 APP_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-18)"
 SESSION_SECRET="$(openssl rand -hex 32)"
+CREDENTIALS_SECRET="$(openssl rand -hex 32)"
 
-python3 - "$APP_PASSWORD" "$SESSION_SECRET" <<'PY'
+python3 - "$APP_PASSWORD" "$SESSION_SECRET" "$CREDENTIALS_SECRET" <<'PY'
 from pathlib import Path
 import sys
 
-password, secret = sys.argv[1:3]
+password, session_secret, credentials_secret = sys.argv[1:4]
 path = Path('.env')
 lines = path.read_text().splitlines()
 updates = {}
 if any(line == 'APP_PASSWORD=GENERATE_ON_SETUP' for line in lines):
     updates['APP_PASSWORD'] = password
 if any(line == 'SESSION_SECRET=GENERATE_ON_SETUP' for line in lines):
-    updates['SESSION_SECRET'] = secret
+    updates['SESSION_SECRET'] = session_secret
+if any(line == 'CREDENTIALS_SECRET=GENERATE_ON_SETUP' for line in lines):
+    updates['CREDENTIALS_SECRET'] = credentials_secret
 out=[]
 for line in lines:
     key=line.split('=',1)[0] if '=' in line else ''
