@@ -59,7 +59,7 @@ read_secret  "Google OAuth Client Secret: " GOOGLE_CLIENT_SECRET_VALUE
 
 read_visible "Meta App ID: " META_APP_ID_VALUE
 read_secret  "Meta App Secret: " META_APP_SECRET_VALUE
-read_visible "Meta Graph API version (blank keeps current, e.g. v23.0): " META_GRAPH_VERSION_VALUE
+read_visible "Meta Graph API version (blank keeps current): " META_GRAPH_VERSION_VALUE
 
 read_visible "Pinterest App ID: " PINTEREST_APP_ID_VALUE
 read_secret  "Pinterest App Secret: " PINTEREST_APP_SECRET_VALUE
@@ -82,6 +82,6 @@ fi
 
 echo
 printf 'Saved API configuration to local .env.\n'
-printf 'Recreating API and Web containers so the new configuration is loaded...\n'
-docker compose up -d --force-recreate api web
+printf 'Recreating API, Web, and sync worker containers so the new configuration is loaded...\n'
+docker compose up -d --force-recreate api web sync-worker
 printf 'Done. Open API 设置 in the website to confirm provider status.\n'
