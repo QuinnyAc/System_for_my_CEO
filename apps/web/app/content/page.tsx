@@ -17,7 +17,8 @@ function contentTypeLabel(type: string, platformSlug?: string) {
 
 function metricText(metric: ContentMetric, platformSlug?: string) {
   const dash = "—";
-  const views = platformSlug === "pinterest" ? dash : formatNumber(metric.views);
+  const contradictoryZeroViews = metric.views === 0 && (metric.likes > 0 || metric.comments > 0 || metric.saves > 0 || metric.shares > 0);
+  const views = platformSlug === "pinterest" || contradictoryZeroViews ? dash : formatNumber(metric.views);
   const likes = platformSlug === "pinterest" ? dash : formatNumber(metric.likes);
   const saves = platformSlug === "pinterest" ? formatNumber(metric.saves) : dash;
   const comments = formatNumber(metric.comments);
@@ -63,7 +64,7 @@ export default function ContentPage() {
         <div>
           <div className="eyebrow">Published Content</div>
           <h1>内容数据</h1>
-          <p>账号添加后，系统会自动发现登记之后发布的新作品，并在这里持续更新公开可见的数据。平台未公开的指标显示为 —。</p>
+          <p>账号添加后，系统会自动发现登记之后发布的新作品，并在这里持续更新公开可见的数据。平台未公开或暂未成功读取的指标显示为 —。</p>
         </div>
       </header>
       {error ? <div className="error">{error}</div> : null}
