@@ -28,7 +28,7 @@ export default function SettingsPage() {
       ready: status.youtube.oauth,
       fallback: status.youtube.api_key,
       callback: status.youtube.callback_url,
-      detail: "Google OAuth 绑定实际频道；API Key 可作为公开频道/公开视频数据的轻量同步方式。",
+      detail: "可选高级接入。Google OAuth 可读取频道后台 Analytics；普通公开数据采集不需要配置这里。",
       requirements: [
         "Google Cloud：启用 YouTube Data API v3",
         "Google Cloud：启用 YouTube Analytics API",
@@ -41,12 +41,12 @@ export default function SettingsPage() {
       ready: status.instagram.oauth,
       fallback: false,
       callback: status.instagram.callback_url,
-      detail: "通过 Meta 官方授权连接 Instagram Professional 账号并读取账号及媒体数据。",
+      detail: "可选高级接入。通过 Meta 官方授权读取 Instagram Professional 后台数据。普通顾客视角采集无需配置。",
       requirements: [
         "Instagram 必须为 Professional（Business / Creator）账号",
         "账号需连接到可管理的 Facebook Page",
         "当前集成请求 instagram_basic / instagram_manage_insights",
-        "同时请求 pages_show_list / pages_read_engagement / pages_read_user_content / read_insights",
+        "同时请求 pages_show_list / pages_read_engagement / read_insights",
       ],
     },
     {
@@ -54,10 +54,10 @@ export default function SettingsPage() {
       ready: status.facebook.oauth,
       fallback: false,
       callback: status.facebook.callback_url,
-      detail: "通过 Meta 官方授权连接可管理的 Facebook Page 及内容数据。",
+      detail: "可选高级接入。通过 Meta 官方授权读取可管理 Facebook Page 后台数据。普通顾客视角采集无需配置。",
       requirements: [
         "Meta Developer App",
-        "当前集成请求 pages_show_list / pages_read_engagement / pages_read_user_content / read_insights",
+        "当前集成请求 pages_show_list / pages_read_engagement / read_insights",
         "授权用户需要对目标 Facebook Page 有管理权限",
         "Instagram 与 Facebook 共用同一 Meta App，可分别建立账号记录",
       ],
@@ -67,7 +67,7 @@ export default function SettingsPage() {
       ready: status.pinterest.oauth,
       fallback: false,
       callback: status.pinterest.callback_url,
-      detail: "通过 Pinterest OAuth 连接账号并读取 Pins 与 Organic 数据。",
+      detail: "可选高级接入。通过 Pinterest OAuth 读取账号及 Organic 数据。普通顾客视角采集无需配置。",
       requirements: [
         "Pinterest Developer App 并获得 API access",
         "权限：user_accounts:read / pins:read",
@@ -79,7 +79,8 @@ export default function SettingsPage() {
 
   return (
     <>
-      <header className="pageHeader"><div><div className="eyebrow">Connections</div><h1>API 设置</h1><p>这里只显示配置状态，不显示任何 Secret 值。平台凭据只保存在这个网站自己的运行环境里。</p></div></header>
+      <header className="pageHeader"><div><div className="eyebrow">Optional Connections</div><h1>高级 API（可选）</h1><p>默认运营方式已经改为“公开数据采集”。这里只用于以后需要更专业后台指标时再配置，不影响普通采集助手使用。</p></div></header>
+      <div className="notice" style={{ marginBottom: 16 }}>如果只需要从顾客视角看播放、点赞、评论、粉丝等公开数字，可以完全跳过本页。</div>
       {notice ? <div className="notice">{notice}</div> : null}
       {error ? <div className="error">{error}</div> : null}
       {!status ? <div className="empty">正在读取 API 配置状态…</div> : (
@@ -87,7 +88,7 @@ export default function SettingsPage() {
           {cards.map((card) => {
             const callbackIsLocal = card.callback.includes("localhost") || card.callback.includes("127.0.0.1");
             return <div className="platformCard" key={card.name}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}><strong>{card.name}</strong><span className="pill">{card.ready ? "OAuth 已配置" : card.fallback ? "API Key 已配置" : "待配置"}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}><strong>{card.name}</strong><span className="pill">{card.ready ? "OAuth 已配置" : card.fallback ? "API Key 已配置" : "未配置"}</span></div>
               <p>{card.detail}</p>
               <div className="rowMeta" style={{ marginTop: 8, lineHeight: 1.75 }}>
                 {card.requirements.map((item) => <div key={item}>• {item}</div>)}
@@ -108,7 +109,7 @@ export default function SettingsPage() {
           META_APP_ID / META_APP_SECRET / META_GRAPH_VERSION<br/>
           PINTEREST_APP_ID / PINTEREST_APP_SECRET
         </div>
-        <p className="rowMeta" style={{ marginTop: 10 }}>Secret 不写入源码。取得平台凭据后，在 Codespace 运行 <code>bash .devcontainer/configure-api-env.sh</code>，脚本会隐藏输入 Secret 并只保存到本地 .env。</p>
+        <p className="rowMeta" style={{ marginTop: 10 }}>Secret 不写入源码。以后如果需要高级 API，在 Codespace 运行 <code>bash .devcontainer/configure-api-env.sh</code> 即可。</p>
       </section>
     </>
   );
