@@ -51,8 +51,10 @@ async function closeTaskTab(current) {
 
 async function clearCurrentTask(current, closeTab = true) {
   await chrome.alarms.clear(TIMEOUT_ALARM);
-  if (closeTab) await closeTaskTab(current);
+  // Clear persistent queue state before closing our own tab. This prevents a
+  // service-worker wake-up from mistaking the intentional close for a failed task.
   await chrome.storage.local.remove(CURRENT_TASK_KEY);
+  if (closeTab) await closeTaskTab(current);
 }
 
 async function failCurrentTask(reason) {
