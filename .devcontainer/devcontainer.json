@@ -1,10 +1,11 @@
 {
   "name": "Media Ops Workspace",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:3.0.1": {
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {
       "version": "latest",
-      "moby": true
+      "moby": true,
+      "dockerDashComposeVersion": "latest"
     }
   },
   "forwardPorts": [3100, 8100],
