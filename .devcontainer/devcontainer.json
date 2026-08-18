@@ -1,13 +1,13 @@
 {
-  "name": "ZenoMinerals Social Ops",
+  "name": "Media Ops Workspace",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
   "forwardPorts": [3100, 8100],
   "portsAttributes": {
-    "3100": { "label": "ZenoMinerals Web", "onAutoForward": "openBrowser" },
-    "8100": { "label": "ZenoMinerals API", "onAutoForward": "silent" }
+    "3100": { "label": "Media Ops Web", "onAutoForward": "openBrowser" },
+    "8100": { "label": "Media Ops API", "onAutoForward": "silent" }
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "postStartCommand": "bash .devcontainer/start.sh"
