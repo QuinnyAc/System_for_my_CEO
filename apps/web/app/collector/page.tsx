@@ -25,6 +25,16 @@ function machineOf(extra: Record<string, unknown>) {
   return String(extra?.machine_name || "").trim();
 }
 
+function taskPlatformLabel(task: CollectorTask) {
+  if (task.platform === "youtube") {
+    return task.url.includes("/shorts/") ? "YouTube 短视频" : "YouTube 长视频";
+  }
+  if (task.platform === "instagram") return "Instagram";
+  if (task.platform === "facebook") return "Facebook";
+  if (task.platform === "pinterest") return "Pinterest";
+  return task.platform;
+}
+
 async function collectorAdmin<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/collector/admin${path}`, {
     ...init,
@@ -177,7 +187,7 @@ export default function CollectorPage() {
         <div>
           <div className="eyebrow">Public View Collector</div>
           <h1>公开数据采集</h1>
-          <p>默认模式。可以手动打开页面采集，也可以直接提交链接，让这台电脑在后台按顺序自动读取公开数据。</p>
+          <p>把作品链接交给这台电脑，浏览器采集助手会在后台逐条打开并读取页面上公开可见的数据。</p>
         </div>
       </header>
 
@@ -186,7 +196,7 @@ export default function CollectorPage() {
 
       <section className="section card">
         <div className="sectionTitle"><h2>自动采集链接队列</h2><span>一台电脑即可运行</span></div>
-        <p className="rowMeta">把视频或内容链接粘贴到下面，一行一个。支持 YouTube、Instagram、Facebook、Pinterest。采集助手会在后台逐条打开，读取公开数字后自动关闭页面。</p>
+        <p className="rowMeta">把视频或内容链接粘贴到下面，一行一个。支持 YouTube 长视频、YouTube 短视频、Instagram、Facebook、Pinterest。YouTube 会根据链接自动判断长视频或短视频。</p>
         <label style={{ display: "block", marginTop: 14, fontWeight: 700 }}>链接</label>
         <textarea
           value={links}
@@ -217,7 +227,7 @@ export default function CollectorPage() {
           <div className="row" key={task.id}>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="rowTitle" style={{ overflowWrap: "anywhere" }}>{task.url}</div>
-              <div className="rowMeta">{task.platform} · 电脑 {task.machine_name || "任意"} · {statusLabel[task.status] || task.status} · 尝试 {task.attempts}/3</div>
+              <div className="rowMeta">{taskPlatformLabel(task)} · 电脑 {task.machine_name || "任意"} · {statusLabel[task.status] || task.status} · 尝试 {task.attempts}/3</div>
               {task.last_error ? <div className="rowMeta" style={{ marginTop: 4 }}>原因：{task.last_error}</div> : null}
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
