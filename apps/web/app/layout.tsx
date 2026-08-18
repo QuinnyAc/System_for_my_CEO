@@ -3,8 +3,8 @@ import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 
 export const metadata: Metadata = {
-  title: "ZenoMinerals 自媒体运营平台",
-  description: "Independent social media operations workspace for ZenoMinerals"
+  title: "Media Ops · 自媒体运营平台",
+  description: "Social media operations and analytics workspace"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

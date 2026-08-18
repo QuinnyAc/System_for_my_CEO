@@ -1,5 +1,5 @@
 [project]
-name = "zeno-social-ops-api"
+name = "media-ops-hub-api"
 version = "0.2.0"
 requires-python = ">=3.12"
 dependencies = [

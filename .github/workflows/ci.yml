@@ -12,18 +12,18 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: zeno_social_ops
-          POSTGRES_USER: zeno_social_ops
-          POSTGRES_PASSWORD: zeno-ci-password
+          POSTGRES_DB: media_ops_hub
+          POSTGRES_USER: media_ops_hub
+          POSTGRES_PASSWORD: media-ops-ci-password
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U zeno_social_ops -d zeno_social_ops"
+          --health-cmd "pg_isready -U media_ops_hub -d media_ops_hub"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql+psycopg://zeno_social_ops:zeno-ci-password@localhost:5432/zeno_social_ops
+      DATABASE_URL: postgresql+psycopg://media_ops_hub:media-ops-ci-password@localhost:5432/media_ops_hub
       CORS_ORIGINS: http://localhost:3100
     defaults:
       run:

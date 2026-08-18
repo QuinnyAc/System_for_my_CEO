@@ -47,7 +47,7 @@ PLATFORMS = {
     "pinterest": "Pinterest",
 }
 
-app = FastAPI(title="ZenoMinerals Social Ops API", version="0.2.0")
+app = FastAPI(title="Media Ops API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -94,7 +94,7 @@ async def require_app_session(request: Request, call_next):
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "system": "zeno_social_ops"}
+    return {"status": "ok", "system": "media_ops_hub"}
 
 
 @app.post("/api/v1/auth/login")
