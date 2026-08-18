@@ -136,6 +136,18 @@ async function failCurrentTask(reason) {
   await schedulePoll(12_000);
 }
 
+async function finishBaselineWait() {
+  const current = await getCurrentTask();
+  if (!current) return;
+  await clearCurrentTask(current, true);
+  await chrome.storage.local.set({
+    lastUploadAt: new Date().toISOString(),
+    lastUploadStatus: "success",
+    lastUploadMessage: "账号作品列表本次未完全加载，后台会按计划自动重试"
+  });
+  await schedulePoll(6_000);
+}
+
 async function pollQueue() {
   if (pollInFlight) return;
   pollInFlight = true;
@@ -169,6 +181,7 @@ async function pollQueue() {
         tabId: tab.id,
         url: task.url,
         platform: task.platform,
+        waitingForBaseline: false,
         startedAt: new Date().toISOString()
       };
       await chrome.storage.local.set({ [CURRENT_TASK_KEY]: queueState });
@@ -233,6 +246,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
+
+      if (payload.page_type === "account" && !result?.baseline_ready) {
+        await chrome.storage.local.set({
+          [CURRENT_TASK_KEY]: { ...current, waitingForBaseline: true },
+          lastUploadAt: new Date().toISOString(),
+          lastUploadStatus: "running",
+          lastUploadMessage: "账号数据已读取，继续等待作品列表完成加载"
+        });
+        await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + 45_000 });
+        sendResponse({ ok: true, result, waiting: true });
+        return;
+      }
+
       if (payload.page_type === "account" && result?.baseline_ready) {
         await clearLegacyBaseline(current.url);
       }
@@ -264,7 +290,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM || alarm.name === HEARTBEAT_ALARM) {
     pollQueue().catch(() => null);
   } else if (alarm.name === TIMEOUT_ALARM) {
-    failCurrentTask("页面在 75 秒内没有读取到公开数据").catch(() => null);
+    getCurrentTask().then((current) => {
+      if (current?.waitingForBaseline) return finishBaselineWait();
+      return failCurrentTask("页面在 75 秒内没有读取到公开数据");
+    }).catch(() => null);
   }
 });
 
