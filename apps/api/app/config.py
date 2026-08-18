@@ -6,13 +6,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = "development"
-    database_url: str = "postgresql+psycopg://zeno_social_ops:change-me-local@localhost:55432/zeno_social_ops"
+    database_url: str = "postgresql+psycopg://media_ops_hub:change-me-local@localhost:55432/media_ops_hub"
     cors_origins: str = "http://localhost:3100"
     public_web_url: str = "http://localhost:3100"
     app_username: str = "admin"
     app_password: str = "change-me-now"
-    session_secret: str = "development-only-zeno-session-secret"
-    credentials_secret: str = "development-only-zeno-credentials-secret"
+    session_secret: str = "development-only-media-ops-session-secret"
+    credentials_secret: str = "development-only-media-ops-credentials-secret"
     auto_sync_enabled: bool = False
     auto_sync_interval_minutes: int = 60
 
@@ -71,8 +71,8 @@ class Settings(BaseSettings):
         if self.app_env == "production":
             weak_values = {
                 "change-me-now",
-                "development-only-zeno-session-secret",
-                "development-only-zeno-credentials-secret",
+                "development-only-media-ops-session-secret",
+                "development-only-media-ops-credentials-secret",
             }
             if self.app_password in weak_values:
                 raise ValueError("APP_PASSWORD must be changed in production")
