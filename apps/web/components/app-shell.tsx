@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 
 const nav = [
   ["/", "总览", "Overview"],
+  ["/monitors", "账号监控", "Auto Discover"],
   ["/collector", "公开数据采集", "Public View"],
   ["/accounts", "账号管理", "Accounts"],
   ["/content", "内容数据", "Content"],
