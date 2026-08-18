@@ -1,4 +1,4 @@
-const VERSION = "0.1.0";
+const VERSION = "0.3.0";
 
 function text(selector) {
   const node = document.querySelector(selector);
@@ -23,14 +23,12 @@ function parseCount(value) {
   let raw = String(value).trim();
   if (!raw) return null;
   raw = raw.replace(/\u00a0/g, " ");
-
   const chinese = raw.match(/([\d,.]+)\s*(万|亿)/);
   if (chinese) {
     const number = Number(chinese[1].replace(/,/g, ""));
     if (!Number.isFinite(number)) return null;
     return Math.round(number * (chinese[2] === "亿" ? 100000000 : 10000));
   }
-
   const compact = raw.match(/([\d,.]+)\s*([KMB])/i);
   if (compact) {
     const number = Number(compact[1].replace(/,/g, ""));
@@ -38,7 +36,6 @@ function parseCount(value) {
     const multiplier = { K: 1e3, M: 1e6, B: 1e9 }[compact[2].toUpperCase()] || 1;
     return Math.round(number * multiplier);
   }
-
   const plain = raw.match(/\d[\d,.\s]*/);
   if (!plain) return null;
   const cleaned = plain[0].replace(/[\s,]/g, "");
@@ -68,6 +65,61 @@ function cleanTitle(value) {
   return (value || "").replace(/\s*[|·-]\s*(YouTube|Instagram|Facebook|Pinterest)\s*$/i, "").trim();
 }
 
+function absoluteUrl(href) {
+  if (!href) return "";
+  try {
+    return new URL(href, location.origin).href;
+  } catch {
+    return "";
+  }
+}
+
+function uniqueLinks(nodes, accept, limit = 60) {
+  const found = [];
+  const seen = new Set();
+  for (const node of nodes) {
+    const href = node.getAttribute("href") || "";
+    const full = absoluteUrl(href);
+    if (!full || !accept(full) || seen.has(full)) continue;
+    seen.add(full);
+    found.push(full);
+    if (found.length >= limit) break;
+  }
+  return found;
+}
+
+function youtubeDiscoveredLinks() {
+  const links = document.querySelectorAll('a[href^="/watch?v="], a[href^="/shorts/"]');
+  return uniqueLinks(links, (value) => {
+    const u = new URL(value);
+    return u.hostname.endsWith("youtube.com") && (u.pathname === "/watch" || u.pathname.startsWith("/shorts/"));
+  }, 80);
+}
+
+function instagramDiscoveredLinks() {
+  const links = document.querySelectorAll('a[href^="/p/"], a[href^="/reel/"]');
+  return uniqueLinks(links, (value) => {
+    const u = new URL(value);
+    return u.hostname.endsWith("instagram.com") && (u.pathname.startsWith("/p/") || u.pathname.startsWith("/reel/"));
+  }, 60);
+}
+
+function facebookDiscoveredLinks() {
+  const links = document.querySelectorAll('a[href*="/reel/"], a[href*="/videos/"], a[href*="/posts/"], a[href*="story_fbid="]');
+  return uniqueLinks(links, (value) => {
+    const u = new URL(value);
+    return u.hostname.endsWith("facebook.com") && (/\/(reel|videos|posts)\//i.test(u.pathname) || u.searchParams.has("story_fbid"));
+  }, 60);
+}
+
+function pinterestDiscoveredLinks() {
+  const links = document.querySelectorAll('a[href^="/pin/"]');
+  return uniqueLinks(links, (value) => {
+    const u = new URL(value);
+    return u.hostname.endsWith("pinterest.com") && u.pathname.startsWith("/pin/");
+  }, 60);
+}
+
 function youtube() {
   const path = location.pathname;
   const content = path === "/watch" || path.startsWith("/shorts/") || path.startsWith("/live/");
@@ -88,7 +140,8 @@ function youtube() {
       account_name: accountName || cleanTitle(document.title),
       handle,
       profile_url: profileUrl || location.href,
-      metrics: { followers }
+      metrics: { followers },
+      discovered_urls: youtubeDiscoveredLinks()
     };
   }
 
@@ -98,7 +151,6 @@ function youtube() {
     const node = candidates.find((el) => /view|观看|次观看|次播放/i.test(el.textContent || ""));
     views = parseCount(node?.textContent || "");
   }
-
   let likes = parseCount(text("#segmented-like-button button"));
   if (likes === null) {
     const likeButton = document.querySelector('#segmented-like-button button, like-button-view-model button');
@@ -106,7 +158,6 @@ function youtube() {
   }
   const comments = parseCount(text("ytd-comments-header-renderer #count"));
   const videoId = path === "/watch" ? new URL(location.href).searchParams.get("v") || "" : path.split("/").filter(Boolean).pop() || "";
-
   return {
     platform: "youtube",
     page_type: "content",
@@ -127,17 +178,14 @@ function instagram() {
   const content = ["p", "reel", "tv"].includes(segments[0]);
   const description = meta("description") || meta("og:description") || "";
   const ogTitle = meta("og:title") || document.title;
-
   let handle = "";
   if (!content && segments.length === 1) handle = segments[0];
   if (content) {
     const titleMatch = ogTitle.match(/@([A-Za-z0-9._]+)/) || description.match(/@([A-Za-z0-9._]+)/);
     if (titleMatch) handle = titleMatch[1];
   }
-
   const followers = countNear(description, ["followers", "粉丝"]);
   const posts = countNear(description, ["posts", "帖子", "贴文"]);
-
   if (!content) {
     return {
       platform: "instagram",
@@ -147,10 +195,10 @@ function instagram() {
       account_name: cleanTitle(ogTitle).replace(/^@/, ""),
       handle,
       profile_url: location.href,
-      metrics: { followers, content_count: posts }
+      metrics: { followers, content_count: posts },
+      discovered_urls: instagramDiscoveredLinks()
     };
   }
-
   const likes = countNear(description, ["likes", "like", "赞"]);
   const comments = countNear(description, ["comments", "comment", "评论"]);
   const body = document.body?.innerText || "";
@@ -177,7 +225,6 @@ function facebook() {
   const firstSegment = path.split("/").filter(Boolean)[0] || "";
   const handle = ["watch", "reel", "photo.php", "story.php"].includes(firstSegment) ? "" : firstSegment;
   const followers = countNear(description, ["followers", "粉丝"]);
-
   if (!content) {
     return {
       platform: "facebook",
@@ -187,10 +234,10 @@ function facebook() {
       account_name: title,
       handle,
       profile_url: location.href,
-      metrics: { followers }
+      metrics: { followers },
+      discovered_urls: facebookDiscoveredLinks()
     };
   }
-
   const views = countNear(description, ["views", "plays", "次观看", "次播放"]);
   const likes = countNear(description, ["reactions", "likes", "赞", "心情"]);
   const comments = countNear(description, ["comments", "评论"]);
@@ -216,7 +263,6 @@ function pinterest() {
   const title = cleanTitle(meta("og:title") || document.title);
   const handle = !content && segments.length === 1 ? segments[0] : "";
   const followers = countNear(description, ["followers", "粉丝"]);
-
   if (!content) {
     return {
       platform: "pinterest",
@@ -226,10 +272,10 @@ function pinterest() {
       account_name: title,
       handle,
       profile_url: location.href,
-      metrics: { followers }
+      metrics: { followers },
+      discovered_urls: pinterestDiscoveredLinks()
     };
   }
-
   const saves = countNear(description, ["saves", "saved", "保存"]);
   const comments = countNear(description, ["comments", "评论"]);
   return {
@@ -258,24 +304,28 @@ function hasMetric(payload) {
   return Object.values(payload?.metrics || {}).some((value) => Number.isFinite(value));
 }
 
+function hasDiscovery(payload) {
+  return Array.isArray(payload?.discovered_urls) && payload.discovered_urls.length > 0;
+}
+
 async function collect() {
   const payload = extract();
-  if (!payload || !hasMetric(payload)) return;
+  if (!payload || (!hasMetric(payload) && !hasDiscovery(payload))) return;
   payload.collector_version = VERSION;
   const fingerprint = JSON.stringify({
     platform: payload.platform,
     page_type: payload.page_type,
     url: location.href,
-    metrics: payload.metrics
+    metrics: payload.metrics,
+    discovered_urls: payload.discovered_urls || []
   });
   const key = "mediaOpsLastPublicMetrics";
   if (sessionStorage.getItem(key) === fingerprint) return;
-
   try {
     const response = await chrome.runtime.sendMessage({ type: "PUBLIC_METRICS", payload });
     if (response?.ok) sessionStorage.setItem(key, fingerprint);
   } catch {
-    // Do not interfere with the social media page if the collector is not configured.
+    // Never interfere with the social media page if the collector is unavailable.
   }
 }
 
@@ -287,6 +337,5 @@ function schedule(delay = 5000) {
 
 schedule(7000);
 setInterval(collect, 10 * 60 * 1000);
-
 const observer = new MutationObserver(() => schedule(5000));
 observer.observe(document.documentElement, { childList: true, subtree: true });
