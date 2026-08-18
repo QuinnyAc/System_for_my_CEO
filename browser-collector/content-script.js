@@ -1,4 +1,4 @@
-const VERSION = "0.4.0";
+const VERSION = "0.4.2";
 
 function text(selector) {
   const node = document.querySelector(selector);
@@ -120,9 +120,62 @@ function pinterestDiscoveredLinks() {
   }, 60);
 }
 
+function youtubeViewCount(videoId) {
+  let value = parseCount(attr('meta[itemprop="interactionCount"]', "content"));
+  if (value !== null) return value;
+
+  const selectors = [
+    "ytd-watch-info-text span",
+    "#info span",
+    "#info-text span",
+    "yt-formatted-string#info",
+    "#view-count",
+    "span.view-count"
+  ];
+  for (const selector of selectors) {
+    for (const node of document.querySelectorAll(selector)) {
+      const source = `${node.textContent || ""} ${node.getAttribute("aria-label") || ""}`;
+      if (!/view|watch|观看|播放/i.test(source)) continue;
+      value = parseCount(source);
+      if (value !== null) return value;
+    }
+  }
+
+  const descriptionSource = [meta("description"), meta("og:description")].filter(Boolean).join(" ");
+  value = countNear(descriptionSource, ["views", "view", "次观看", "次播放", "观看次数"]);
+  if (value !== null) return value;
+
+  for (const script of document.querySelectorAll("script")) {
+    const source = script.textContent || "";
+    if (!source || (!source.includes('"viewCount"') && !source.includes('"userInteractionCount"'))) continue;
+    const playerMatch = source.match(/"videoDetails"\s*:\s*\{[\s\S]{0,8000}?"viewCount"\s*:\s*"?(\d+)"?/);
+    if (playerMatch) {
+      value = parseCount(playerMatch[1]);
+      if (value !== null) return value;
+    }
+    if (videoId && source.includes(videoId)) {
+      const genericMatch = source.match(/"viewCount"\s*:\s*"?(\d+)"?/);
+      if (genericMatch) {
+        value = parseCount(genericMatch[1]);
+        if (value !== null) return value;
+      }
+    }
+    const interactionMatch = source.match(/"userInteractionCount"\s*:\s*"?([\d,]+)"?/);
+    if (interactionMatch) {
+      value = parseCount(interactionMatch[1]);
+      if (value !== null) return value;
+    }
+  }
+
+  const body = document.body?.innerText?.slice(0, 20000) || "";
+  return countNear(body, ["views", "view", "次观看", "次播放", "观看次数"]);
+}
+
 function youtube() {
   const path = location.pathname;
-  const content = path === "/watch" || path.startsWith("/shorts/") || path.startsWith("/live/");
+  const host = location.hostname.replace(/^www\./, "").toLowerCase();
+  const isShortLink = host === "youtu.be";
+  const content = isShortLink || path === "/watch" || path.startsWith("/shorts/") || path.startsWith("/live/");
   const channelLink = document.querySelector('ytd-video-owner-renderer a[href^="/@"], #owner a[href^="/@"], ytd-channel-name a[href^="/@"]');
   const href = channelLink?.getAttribute("href") || "";
   let handle = href.startsWith("/@") ? href.slice(1).split("/")[0] : "";
@@ -151,19 +204,18 @@ function youtube() {
     };
   }
 
-  let views = parseCount(attr('meta[itemprop="interactionCount"]', "content"));
-  if (views === null) {
-    const candidates = [...document.querySelectorAll("ytd-watch-info-text span, #info span")];
-    const node = candidates.find((el) => /view|观看|次观看|次播放/i.test(el.textContent || ""));
-    views = parseCount(node?.textContent || "");
-  }
+  const videoId = isShortLink
+    ? path.split("/").filter(Boolean)[0] || ""
+    : path === "/watch"
+      ? new URL(location.href).searchParams.get("v") || ""
+      : path.split("/").filter(Boolean).pop() || "";
+  const views = youtubeViewCount(videoId);
   let likes = parseCount(text("#segmented-like-button button"));
   if (likes === null) {
     const likeButton = document.querySelector('#segmented-like-button button, like-button-view-model button');
     likes = parseCount(likeButton?.getAttribute("aria-label") || "");
   }
   const comments = parseCount(text("ytd-comments-header-renderer #count"));
-  const videoId = path === "/watch" ? new URL(location.href).searchParams.get("v") || "" : path.split("/").filter(Boolean).pop() || "";
   return {
     platform: "youtube",
     page_type: "content",
@@ -225,7 +277,8 @@ function instagram() {
 
 function facebook() {
   const path = location.pathname;
-  const content = /\/(posts|videos|reel|watch|photo|permalink)\b/i.test(path) || /story_fbid=/.test(location.search);
+  const host = location.hostname.replace(/^www\./, "").toLowerCase();
+  const content = host === "fb.watch" || /\/(posts|videos|reel|watch|photo|permalink)\b/i.test(path) || /story_fbid=/.test(location.search);
   const description = [meta("description"), meta("og:description"), document.body?.innerText?.slice(0, 12000) || ""].filter(Boolean).join(" ");
   const title = cleanTitle(meta("og:title") || document.title);
   const firstSegment = path.split("/").filter(Boolean)[0] || "";
@@ -264,8 +317,9 @@ function facebook() {
 
 function pinterest() {
   const path = location.pathname;
+  const host = location.hostname.replace(/^www\./, "").toLowerCase();
   const segments = path.split("/").filter(Boolean);
-  const content = segments[0] === "pin";
+  const content = host === "pin.it" || segments[0] === "pin";
   const description = [meta("description"), meta("og:description"), document.body?.innerText?.slice(0, 8000) || ""].filter(Boolean).join(" ");
   const title = cleanTitle(meta("og:title") || document.title);
   const handle = !content && segments.length === 1 ? segments[0] : "";
@@ -303,8 +357,8 @@ function extract() {
   const host = location.hostname.replace(/^www\./, "").toLowerCase();
   if (host.endsWith("youtube.com") || host === "youtu.be") return youtube();
   if (host.endsWith("instagram.com")) return instagram();
-  if (host.endsWith("facebook.com")) return facebook();
-  if (host.endsWith("pinterest.com")) return pinterest();
+  if (host.endsWith("facebook.com") || host === "fb.watch") return facebook();
+  if (host.endsWith("pinterest.com") || host === "pin.it") return pinterest();
   return null;
 }
 
