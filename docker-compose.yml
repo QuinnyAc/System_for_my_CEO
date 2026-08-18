@@ -23,7 +23,7 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-media_ops_hub}:${POSTGRES_PASSWORD:-change-me-local}@db:5432/${POSTGRES_DB:-media_ops_hub}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3100}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3100}
-      APP_USERNAME: ${APP_USERNAME:-admin}
+      APP_USERNAME: ${APP_USERNAME:-Quinny/WR}
       APP_PASSWORD: ${APP_PASSWORD:-change-me-now}
       SESSION_SECRET: ${SESSION_SECRET:-development-only-media-ops-session-secret}
       CREDENTIALS_SECRET: ${CREDENTIALS_SECRET:-development-only-media-ops-credentials-secret}
