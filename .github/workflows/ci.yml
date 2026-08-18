@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "build/**"]
+    branches: [main, "build/**", "stabilize/**"]
   pull_request:
 
 jobs:
@@ -63,6 +63,19 @@ jobs:
       - run: node --check browser-collector/content-script.js
       - run: node --check browser-collector/options.js
       - run: node -e "JSON.parse(require('fs').readFileSync('browser-collector/manifest.json','utf8')); console.log('manifest ok')"
+      - name: Verify collector version consistency
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const manifest = JSON.parse(fs.readFileSync('browser-collector/manifest.json', 'utf8'));
+          const source = fs.readFileSync('browser-collector/content-script.js', 'utf8');
+          const match = source.match(/const VERSION = \"([^\"]+)\"/);
+          if (!match) throw new Error('content-script VERSION is missing');
+          if (match[1] !== manifest.version) {
+            throw new Error(`version mismatch: manifest=${manifest.version} content-script=${match[1]}`);
+          }
+          console.log(`collector version ${manifest.version} consistent`);
+          NODE
 
   compose:
     runs-on: ubuntu-latest
