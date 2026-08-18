@@ -70,16 +70,6 @@ export default function ContentPage() {
   const pmap = useMemo(() => new Map(platforms.map((p) => [p.id, p])), [platforms]);
   const mmap = useMemo(() => new Map(metrics.map((m) => [m.content_id, m])), [metrics]);
 
-  async function remove(id: string) {
-    if (!confirm("确定删除这条内容和所有历史数据吗？")) return;
-    try {
-      await api<void>(`/content/${id}`, { method: "DELETE" });
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "删除失败");
-    }
-  }
-
   return (
     <>
       <header className="pageHeader">
@@ -109,7 +99,6 @@ export default function ContentPage() {
                   </div>
                   <div style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     {item.url ? <a className="button secondary" href={item.url} target="_blank" rel="noreferrer">打开作品</a> : null}
-                    <button className="button danger" onClick={() => remove(item.id)}>删除</button>
                   </div>
                 </div>
               );
