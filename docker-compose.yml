@@ -18,7 +18,7 @@ services:
   api:
     build:
       context: ./apps/api
-    environment:
+    environment: &api_environment
       APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-media_ops_hub}:${POSTGRES_PASSWORD:-change-me-local}@db:5432/${POSTGRES_DB:-media_ops_hub}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3100}
@@ -45,6 +45,18 @@ services:
     volumes:
       - ./apps/api:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8100 --reload
+
+  sync-worker:
+    build:
+      context: ./apps/api
+    environment: *api_environment
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./apps/api:/app
+    command: python -m app.sync_worker
+    restart: unless-stopped
 
   web:
     build:
