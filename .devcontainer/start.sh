@@ -52,7 +52,7 @@ fi
 COLLECTOR_URL="${WEB_URL}/collector"
 
 APP_USERNAME_VALUE="$(sed -n 's/^APP_USERNAME=//p' .env | head -n1)"
-APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-Quinny/WR}"
+APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-WR}"
 
 cat <<EOF
 
