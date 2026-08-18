@@ -8,13 +8,14 @@ export function middleware(request: NextRequest) {
     path.startsWith("/api/") ||
     path.startsWith("/collector/") ||
     path.startsWith("/_next/") ||
-    path === "/favicon.ico"
-  ) return NextResponse.next();
-  if (path === "/login") {
-    if (request.cookies.has(SESSION_COOKIE)) return NextResponse.redirect(new URL("/", request.url));
+    path === "/favicon.ico" ||
+    path === "/login"
+  ) {
     return NextResponse.next();
   }
-  if (!request.cookies.has(SESSION_COOKIE)) return NextResponse.redirect(new URL("/login", request.url));
+  if (!request.cookies.has(SESSION_COOKIE)) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
   return NextResponse.next();
 }
 

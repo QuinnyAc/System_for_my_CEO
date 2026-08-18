@@ -19,6 +19,8 @@ from app.models import (
     CollectorTask,
     ContentMetricSnapshot,
     MonitoredAccount,
+    MonitoredContentSeen,
+    MonitorFeedState,
     Platform,
     PublishedContent,
     SocialAccount,
@@ -33,8 +35,10 @@ PLATFORMS = {
 }
 
 COLLECTOR_TOKEN = os.getenv("COLLECTOR_TOKEN", "")
+MONITOR_INTERVAL = timedelta(hours=1)
+BASELINE_RETRY_INTERVAL = timedelta(minutes=10)
 
-app = FastAPI(title="Media Ops Browser Collector", version="0.4.0")
+app = FastAPI(title="Media Ops Browser Collector", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -67,7 +71,10 @@ class CollectorPayload(BaseModel):
     content_external_id: str = ""
     content_type: str = "video"
     metrics: PublicMetrics = Field(default_factory=PublicMetrics)
-    discovered_urls: list[str] = Field(default_factory=list, max_length=120)
+    discovered_urls: list[str] = Field(default_factory=list, max_length=160)
+    previous_seen_urls: list[str] = Field(default_factory=list, max_length=240)
+    discovery_complete: bool = False
+    feed_empty: bool = False
     machine_name: str = ""
     collector_version: str = ""
     task_id: UUID | None = None
@@ -80,6 +87,7 @@ class CollectorResult(BaseModel):
     account_snapshot_created: bool = False
     content_snapshot_created: bool = False
     discovered_tasks_created: int = 0
+    baseline_ready: bool = False
     task_completed: bool = False
 
 
@@ -151,6 +159,26 @@ class MonitorRead(BaseModel):
     created_at: datetime
 
 
+class AdminAccountCreate(BaseModel):
+    platform: str
+    name: str = Field(min_length=1, max_length=160)
+    profile_url: str = Field(min_length=1)
+    machine_name: str | None = Field(default=None, max_length=120)
+
+
+class AdminAccountResult(BaseModel):
+    account_id: UUID
+    monitor_id: UUID
+    platform: str
+    profile_url: str
+    account_created: bool
+    monitor_created: bool
+
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def require_collector_token(x_collector_token: str = Header(default="")) -> None:
     if not COLLECTOR_TOKEN or not hmac.compare_digest(x_collector_token, COLLECTOR_TOKEN):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid collector token")
@@ -166,6 +194,22 @@ def normalize_handle(value: str) -> str:
     return raw if raw.startswith("@") or not raw else f"@{raw}"
 
 
+def _facebook_identity_query(parsed) -> str:
+    query = parse_qs(parsed.query)
+    keys: list[str] = []
+    path = parsed.path.rstrip("/") or "/"
+    if path in {"/watch", "/watch/"} and query.get("v", [""])[0]:
+        keys = ["v"]
+    elif path.endswith("/profile.php") and query.get("id", [""])[0]:
+        keys = ["id"]
+    elif query.get("story_fbid", [""])[0]:
+        keys = ["story_fbid", "id"]
+    elif query.get("fbid", [""])[0]:
+        keys = ["fbid", "id"]
+    values = {key: query.get(key, [""])[0] for key in keys if query.get(key, [""])[0]}
+    return urlencode(values)
+
+
 def normalize_url(value: str) -> str:
     raw = value.strip()
     if not raw:
@@ -176,7 +220,7 @@ def normalize_url(value: str) -> str:
     except ValueError:
         return raw
     scheme = parsed.scheme or "https"
-    host = parsed.netloc.lower()
+    host = parsed.netloc.lower().split(":")[0]
     if host.startswith("www."):
         host = host[4:]
     path = parsed.path.rstrip("/") or "/"
@@ -184,6 +228,8 @@ def normalize_url(value: str) -> str:
     if host in {"youtube.com", "m.youtube.com"} and path == "/watch":
         video_id = parse_qs(parsed.query).get("v", [""])[0]
         query = urlencode({"v": video_id}) if video_id else ""
+    elif host.endswith("facebook.com"):
+        query = _facebook_identity_query(parsed)
     return urlunparse((scheme, host, path, "", query, ""))
 
 
@@ -209,16 +255,60 @@ def platform_for_url(value: str) -> str | None:
     return None
 
 
+def is_content_url(platform: str, value: str) -> bool:
+    raw = value.strip()
+    if not raw:
+        return False
+    candidate = raw if "://" in raw else f"https://{raw}"
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        return False
+    host = parsed.netloc.lower().split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    path = parsed.path.rstrip("/") or "/"
+    parts = [part.lower() for part in path.split("/") if part]
+    query = parse_qs(parsed.query)
+    if platform == "youtube":
+        return host == "youtu.be" or path == "/watch" or bool(parts and parts[0] in {"shorts", "live"})
+    if platform == "instagram":
+        return bool(parts and parts[0] in {"p", "reel", "tv"})
+    if platform == "facebook":
+        if host == "fb.watch" or "story_fbid" in query or "fbid" in query:
+            return True
+        return any(part in {"posts", "videos", "reel", "watch", "photo", "permalink"} for part in parts[1:]) or bool(parts and parts[0] in {"watch", "reel"})
+    if platform == "pinterest":
+        return host == "pin.it" or bool(parts and parts[0] == "pin")
+    return False
+
+
 def normalize_profile_url(platform: str, value: str) -> str:
     normalized = normalize_url(value)
     parsed = urlparse(normalized)
     path = parsed.path.rstrip("/")
+    query = parsed.query
     if platform == "youtube":
         for suffix in ("/videos", "/shorts", "/streams", "/featured"):
             if path.endswith(suffix):
                 path = path[: -len(suffix)]
                 break
-    return urlunparse((parsed.scheme, parsed.netloc, path or "/", "", "", ""))
+    elif platform == "instagram":
+        parts = [part for part in path.split("/") if part]
+        if parts and parts[0].lower() not in {"p", "reel", "tv", "explore", "accounts"}:
+            path = f"/{parts[0]}"
+            query = ""
+    elif platform == "facebook":
+        for suffix in ("/videos", "/reels", "/posts"):
+            if path.endswith(suffix) and len([part for part in path.split("/") if part]) >= 2:
+                path = path[: -len(suffix)]
+                break
+    elif platform == "pinterest":
+        parts = [part for part in path.split("/") if part]
+        if parts and parts[0].lower() != "pin":
+            path = f"/{parts[0]}"
+            query = ""
+    return urlunparse((parsed.scheme, parsed.netloc, path or "/", "", query, ""))
 
 
 def monitor_task_urls(monitor: MonitoredAccount) -> list[str]:
@@ -245,7 +335,7 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "collector": "browser_public_view"}
+    return {"status": "ok", "collector": "browser_public_view", "version": "0.5.0"}
 
 
 def task_exists(db: Session, url: str, active_only: bool = True) -> bool:
@@ -267,6 +357,36 @@ def add_task(db: Session, url: str, platform: str, machine_name: str | None = No
     )
     db.add(task)
     return task
+
+
+def _monitor_for_feed(db: Session, task_url: str, platform: str | None = None) -> MonitoredAccount | None:
+    target = normalize_url(task_url)
+    stmt = select(MonitoredAccount).where(MonitoredAccount.enabled.is_(True))
+    if platform:
+        stmt = stmt.where(MonitoredAccount.platform == platform)
+    for monitor in db.scalars(stmt):
+        if target in {normalize_url(url) for url in monitor_task_urls(monitor)}:
+            return monitor
+    return None
+
+
+def _monitor_for_content(db: Session, url: str, platform: str) -> tuple[MonitoredAccount | None, MonitoredContentSeen | None]:
+    target = normalize_url(url)
+    seen = db.scalar(
+        select(MonitoredContentSeen)
+        .where(MonitoredContentSeen.platform == platform, MonitoredContentSeen.url == target)
+        .order_by(MonitoredContentSeen.first_seen_at.desc())
+        .limit(1)
+    )
+    if seen is None:
+        return None, None
+    return db.get(MonitoredAccount, seen.monitor_id), seen
+
+
+def _queue_monitor_now(db: Session, monitor: MonitoredAccount) -> None:
+    for url in monitor_task_urls(monitor):
+        add_task(db, url, monitor.platform, monitor.machine_name)
+    monitor.next_check_at = now_utc() + MONITOR_INTERVAL
 
 
 @app.get("/admin/tasks", response_model=list[AdminTaskRead], dependencies=[Depends(require_admin_session)])
@@ -332,6 +452,119 @@ def admin_retry_task(task_id: UUID, db: Session = Depends(get_db)):
     return task
 
 
+@app.post("/admin/accounts", response_model=AdminAccountResult, dependencies=[Depends(require_admin_session)])
+def admin_create_account(payload: AdminAccountCreate, db: Session = Depends(get_db)) -> AdminAccountResult:
+    detected = platform_for_url(payload.profile_url)
+    platform_slug = payload.platform.strip().lower()
+    if detected not in PLATFORMS or platform_slug != detected:
+        raise HTTPException(status_code=422, detail="主页链接与平台不匹配")
+    if is_content_url(platform_slug, payload.profile_url):
+        raise HTTPException(status_code=422, detail="请填写账号主页地址，不要填写单个作品链接")
+    platform = db.scalar(select(Platform).where(Platform.slug == platform_slug))
+    if platform is None:
+        raise HTTPException(status_code=500, detail="Platform catalog is not initialized")
+    profile_url = normalize_profile_url(platform_slug, payload.profile_url)
+
+    account = db.scalar(
+        select(SocialAccount).where(
+            SocialAccount.platform_id == platform.id,
+            SocialAccount.profile_url == profile_url,
+        )
+    )
+    account_created = account is None
+    if account is None:
+        account = SocialAccount(
+            platform_id=platform.id,
+            name=payload.name.strip()[:160],
+            profile_url=profile_url,
+        )
+        db.add(account)
+        db.flush()
+    else:
+        account.name = payload.name.strip()[:160]
+
+    monitor = db.scalar(
+        select(MonitoredAccount).where(
+            MonitoredAccount.platform == platform_slug,
+            MonitoredAccount.profile_url == profile_url,
+        )
+    )
+    monitor_created = monitor is None
+    if monitor is None:
+        monitor = MonitoredAccount(
+            platform=platform_slug,
+            name=payload.name.strip()[:160],
+            profile_url=profile_url,
+            machine_name=(payload.machine_name or "").strip()[:120] or None,
+            enabled=True,
+            next_check_at=now_utc(),
+        )
+        db.add(monitor)
+        db.flush()
+    else:
+        monitor.name = payload.name.strip()[:160]
+        monitor.enabled = True
+        monitor.last_error = None
+        if payload.machine_name is not None:
+            monitor.machine_name = payload.machine_name.strip()[:120] or None
+
+    _queue_monitor_now(db, monitor)
+    db.commit()
+    db.refresh(account)
+    db.refresh(monitor)
+    return AdminAccountResult(
+        account_id=account.id,
+        monitor_id=monitor.id,
+        platform=platform_slug,
+        profile_url=profile_url,
+        account_created=account_created,
+        monitor_created=monitor_created,
+    )
+
+
+@app.delete("/admin/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin_session)])
+def admin_delete_account(account_id: UUID, db: Session = Depends(get_db)):
+    account = db.get(SocialAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    platform = db.get(Platform, account.platform_id)
+    urls: set[str] = set()
+    if account.profile_url and platform:
+        profile_url = normalize_profile_url(platform.slug, account.profile_url)
+        monitors = list(
+            db.scalars(
+                select(MonitoredAccount).where(
+                    MonitoredAccount.platform == platform.slug,
+                    MonitoredAccount.profile_url == profile_url,
+                )
+            )
+        )
+        for monitor in monitors:
+            urls.update(normalize_url(value) for value in monitor_task_urls(monitor))
+            urls.update(
+                db.scalars(
+                    select(MonitoredContentSeen.url).where(MonitoredContentSeen.monitor_id == monitor.id)
+                ).all()
+            )
+            db.delete(monitor)
+    urls.update(
+        normalize_url(value)
+        for value in db.scalars(
+            select(PublishedContent.url).where(
+                PublishedContent.account_id == account.id,
+                PublishedContent.url.is_not(None),
+            )
+        ).all()
+        if value
+    )
+    if urls:
+        for task in db.scalars(select(CollectorTask).where(CollectorTask.url.in_(list(urls)))):
+            db.delete(task)
+    db.delete(account)
+    db.commit()
+    return None
+
+
 @app.get("/admin/monitors", response_model=list[MonitorRead], dependencies=[Depends(require_admin_session)])
 def admin_list_monitors(db: Session = Depends(get_db)):
     return list(db.scalars(select(MonitoredAccount).order_by(MonitoredAccount.created_at.desc())))
@@ -342,6 +575,8 @@ def admin_create_monitor(payload: MonitorCreate, db: Session = Depends(get_db)):
     platform = payload.platform.strip().lower()
     if platform not in PLATFORMS:
         raise HTTPException(status_code=422, detail="不支持的平台")
+    if is_content_url(platform, payload.profile_url):
+        raise HTTPException(status_code=422, detail="请填写账号主页地址，不要填写单个作品链接")
     profile_url = normalize_profile_url(platform, payload.profile_url)
     if platform_for_url(profile_url) != platform:
         raise HTTPException(status_code=422, detail="主页链接与平台不匹配")
@@ -359,9 +594,11 @@ def admin_create_monitor(payload: MonitorCreate, db: Session = Depends(get_db)):
         profile_url=profile_url,
         machine_name=(payload.machine_name or "").strip()[:120] or None,
         enabled=True,
-        next_check_at=datetime.now(timezone.utc),
+        next_check_at=now_utc(),
     )
     db.add(item)
+    db.flush()
+    _queue_monitor_now(db, item)
     db.commit()
     db.refresh(item)
     return item
@@ -378,9 +615,11 @@ def admin_update_monitor(monitor_id: UUID, payload: MonitorUpdate, db: Session =
         item.machine_name = payload.machine_name.strip()[:120] or None
     if payload.enabled is not None:
         item.enabled = payload.enabled
+        item.last_error = None
         if payload.enabled:
-            item.next_check_at = datetime.now(timezone.utc)
-            item.last_error = None
+            _queue_monitor_now(db, item)
+        else:
+            item.next_check_at = None
     db.commit()
     db.refresh(item)
     return item
@@ -405,18 +644,16 @@ def ensure_due_monitor_tasks(db: Session, now: datetime) -> None:
                 or_(MonitoredAccount.next_check_at.is_(None), MonitoredAccount.next_check_at <= now),
             )
             .order_by(MonitoredAccount.next_check_at.asc().nullsfirst())
-            .limit(20)
+            .limit(30)
         )
     )
-    changed = False
+    if not due:
+        return
     for monitor in due:
         for url in monitor_task_urls(monitor):
-            if add_task(db, url, monitor.platform, monitor.machine_name):
-                changed = True
-        monitor.next_check_at = now + timedelta(hours=1)
-        changed = True
-    if changed:
-        db.commit()
+            add_task(db, url, monitor.platform, monitor.machine_name)
+        monitor.next_check_at = now + MONITOR_INTERVAL
+    db.commit()
 
 
 def refresh_interval(item: PublishedContent, now: datetime) -> timedelta:
@@ -444,8 +681,10 @@ def ensure_due_content_refresh_tasks(db: Session, now: datetime) -> None:
     )
     queued = 0
     for item in items:
-        if queued >= 50 or not item.url:
+        if queued >= 50:
             break
+        if not item.url:
+            continue
         platform = platform_for_url(item.url)
         if not platform:
             continue
@@ -493,24 +732,49 @@ def release_stale_tasks(db: Session, now: datetime) -> None:
         db.commit()
 
 
-@app.get("/tasks/next", response_model=QueueLease, dependencies=[Depends(require_collector_token)])
-def next_task(machine_name: str = Query(default="", max_length=120), db: Session = Depends(get_db)) -> QueueLease:
-    now = datetime.now(timezone.utc)
-    release_stale_tasks(db, now)
-    ensure_due_monitor_tasks(db, now)
-    ensure_due_content_refresh_tasks(db, now)
-
-    machine = machine_name.strip()
+def _assignment(machine: str):
     assignment = or_(CollectorTask.machine_name.is_(None), CollectorTask.machine_name == "")
     if machine:
         assignment = or_(assignment, CollectorTask.machine_name == machine)
-    task = db.scalar(
+    return assignment
+
+
+def _lease_task(db: Session, machine: str) -> CollectorTask | None:
+    assignment = _assignment(machine)
+    feed_urls: list[str] = []
+    for monitor in db.scalars(select(MonitoredAccount).where(MonitoredAccount.enabled.is_(True))):
+        feed_urls.extend(normalize_url(url) for url in monitor_task_urls(monitor))
+    if feed_urls:
+        task = db.scalar(
+            select(CollectorTask)
+            .where(
+                CollectorTask.status == "pending",
+                assignment,
+                CollectorTask.url.in_(feed_urls),
+            )
+            .order_by(CollectorTask.created_at.asc())
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        if task:
+            return task
+    return db.scalar(
         select(CollectorTask)
         .where(CollectorTask.status == "pending", assignment)
         .order_by(CollectorTask.created_at.asc())
         .with_for_update(skip_locked=True)
         .limit(1)
     )
+
+
+@app.get("/tasks/next", response_model=QueueLease, dependencies=[Depends(require_collector_token)])
+def next_task(machine_name: str = Query(default="", max_length=120), db: Session = Depends(get_db)) -> QueueLease:
+    now = now_utc()
+    release_stale_tasks(db, now)
+    ensure_due_monitor_tasks(db, now)
+    ensure_due_content_refresh_tasks(db, now)
+    machine = machine_name.strip()
+    task = _lease_task(db, machine)
     if task is None:
         return QueueLease(task=None)
     task.status = "processing"
@@ -527,30 +791,52 @@ def next_task(machine_name: str = Query(default="", max_length=120), db: Session
 def fail_task(task_id: UUID, payload: QueueFailure, db: Session = Depends(get_db)):
     task = db.get(CollectorTask, task_id)
     if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+        return {"ok": True, "status": "gone"}
     if task.status == "completed":
         return {"ok": True, "status": task.status}
     task.last_error = (payload.error or "页面没有读取到公开数据")[:1000]
     task.started_at = None
     task.status = "error" if task.attempts >= 3 else "pending"
-    for monitor in db.scalars(select(MonitoredAccount).where(MonitoredAccount.enabled.is_(True))):
-        if normalize_url(task.url) in {normalize_url(url) for url in monitor_task_urls(monitor)}:
-            monitor.last_error = task.last_error
-            monitor.next_check_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+    monitor = _monitor_for_feed(db, task.url, task.platform)
+    if monitor:
+        monitor.last_error = task.last_error
+        monitor.next_check_at = now_utc() + timedelta(minutes=30)
     db.commit()
     return {"ok": True, "status": task.status, "attempts": task.attempts}
+
+
+def _find_account_by_profile(db: Session, platform: Platform, profile_url: str) -> SocialAccount | None:
+    if not profile_url:
+        return None
+    normalized = normalize_profile_url(platform.slug, profile_url)
+    return db.scalar(
+        select(SocialAccount).where(
+            SocialAccount.platform_id == platform.id,
+            SocialAccount.profile_url == normalized,
+        )
+    )
 
 
 def find_or_create_account(db: Session, payload: CollectorPayload, platform: Platform) -> SocialAccount:
     handle = normalize_handle(payload.handle)
     account: SocialAccount | None = None
-    if payload.external_id:
+    if payload.page_type == "content":
+        existing_content = db.scalar(
+            select(PublishedContent).where(PublishedContent.url == normalize_url(payload.url)).limit(1)
+        )
+        if existing_content is not None:
+            existing_account = db.get(SocialAccount, existing_content.account_id)
+            if existing_account is not None and existing_account.platform_id == platform.id:
+                account = existing_account
+    if account is None and payload.external_id:
         account = db.scalar(
             select(SocialAccount).where(
                 SocialAccount.platform_id == platform.id,
                 SocialAccount.external_id == payload.external_id,
             )
         )
+    if account is None and payload.profile_url:
+        account = _find_account_by_profile(db, platform, payload.profile_url)
     if account is None and handle:
         account = db.scalar(
             select(SocialAccount).where(
@@ -559,13 +845,6 @@ def find_or_create_account(db: Session, payload: CollectorPayload, platform: Pla
             )
         )
     profile_url = normalize_profile_url(platform.slug, payload.profile_url) if payload.profile_url else ""
-    if account is None and profile_url:
-        account = db.scalar(
-            select(SocialAccount).where(
-                SocialAccount.platform_id == platform.id,
-                SocialAccount.profile_url == profile_url,
-            )
-        )
     if account is None:
         fallback_name = payload.account_name.strip() or handle.lstrip("@") or f"{platform.name} Account"
         account = SocialAccount(
@@ -578,40 +857,41 @@ def find_or_create_account(db: Session, payload: CollectorPayload, platform: Pla
         db.add(account)
         db.flush()
     else:
-        if payload.account_name.strip():
-            account.name = payload.account_name.strip()[:160]
         if handle:
             account.handle = handle[:160]
         if payload.external_id:
             account.external_id = payload.external_id[:255]
         if profile_url:
             account.profile_url = profile_url
+        generic_names = {"", f"{platform.name} Account"}
+        if account.name in generic_names and payload.account_name.strip():
+            account.name = payload.account_name.strip()[:160]
     return account
 
 
-def same_account_snapshot(latest: AccountMetricSnapshot | None, metrics: PublicMetrics) -> bool:
+def _legacy_known(latest, key: str) -> bool:
     if latest is None:
         return False
-    return (
-        (metrics.followers is None or latest.followers == metrics.followers)
-        and (metrics.account_views is None or latest.views == metrics.account_views)
-        and (metrics.content_count is None or latest.content_count == metrics.content_count)
-    )
+    extra = latest.extra_metrics or {}
+    known = extra.get("known") if isinstance(extra, dict) else None
+    if isinstance(known, dict) and isinstance(known.get(key), bool):
+        return bool(known[key])
+    available = extra.get("available") if isinstance(extra, dict) else None
+    if isinstance(available, dict) and isinstance(available.get(key), bool):
+        return bool(available[key])
+    value = getattr(latest, key, 0)
+    return bool(value)
 
 
-def same_content_snapshot(latest: ContentMetricSnapshot | None, metrics: PublicMetrics) -> bool:
-    if latest is None:
-        return False
-    return (
-        (metrics.views is None or latest.views == metrics.views)
-        and (metrics.likes is None or latest.likes == metrics.likes)
-        and (metrics.comments is None or latest.comments == metrics.comments)
-        and (metrics.saves is None or latest.saves == metrics.saves)
-        and (metrics.shares is None or latest.shares == metrics.shares)
-    )
+def _merged_value(latest, key: str, current: int | None) -> tuple[int, bool]:
+    if current is not None:
+        return current, True
+    if latest is not None and _legacy_known(latest, key):
+        return int(getattr(latest, key, 0)), True
+    return 0, False
 
 
-def source_meta(payload: CollectorPayload) -> dict:
+def _metric_meta(payload: CollectorPayload, available: dict[str, bool], known: dict[str, bool]) -> dict:
     return {
         "source": "browser_public_view",
         "page_url": normalize_url(payload.url),
@@ -619,13 +899,14 @@ def source_meta(payload: CollectorPayload) -> dict:
         "collector_version": payload.collector_version,
         "public_view_only": True,
         "collector_task_id": str(payload.task_id) if payload.task_id else "",
+        "available": available,
+        "known": known,
     }
 
 
 def maybe_add_account_snapshot(db: Session, account: SocialAccount, payload: CollectorPayload) -> bool:
     metrics = payload.metrics
-    has_account_metric = metrics.followers is not None or metrics.account_views is not None or metrics.content_count is not None
-    if not has_account_metric:
+    if metrics.followers is None and metrics.account_views is None and metrics.content_count is None:
         return False
     latest = db.scalar(
         select(AccountMetricSnapshot)
@@ -633,20 +914,32 @@ def maybe_add_account_snapshot(db: Session, account: SocialAccount, payload: Col
         .order_by(AccountMetricSnapshot.captured_at.desc())
         .limit(1)
     )
-    now = datetime.now(timezone.utc)
-    if latest and latest.captured_at and latest.captured_at >= now - timedelta(minutes=30) and same_account_snapshot(latest, metrics):
-        return False
+    followers, followers_known = _merged_value(latest, "followers", metrics.followers)
+    views, views_known = _merged_value(latest, "views", metrics.account_views)
+    content_count, content_known = _merged_value(latest, "content_count", metrics.content_count)
+    available = {
+        "followers": metrics.followers is not None,
+        "views": metrics.account_views is not None,
+        "content_count": metrics.content_count is not None,
+    }
+    known = {"followers": followers_known, "views": views_known, "content_count": content_known}
+    values = (followers, views, content_count)
+    if latest and latest.captured_at and latest.captured_at >= now_utc() - timedelta(minutes=30):
+        latest_values = (latest.followers, latest.views, latest.content_count)
+        latest_known = {key: _legacy_known(latest, key) for key in ("followers", "views", "content_count")}
+        if values == latest_values and known == latest_known:
+            return False
     db.add(
         AccountMetricSnapshot(
             account_id=account.id,
-            captured_at=now,
-            followers=metrics.followers or 0,
-            views=metrics.account_views or 0,
-            content_count=metrics.content_count or 0,
+            captured_at=now_utc(),
+            followers=followers,
+            views=views,
+            content_count=content_count,
             impressions=0,
             reach=0,
             engagements=0,
-            extra_metrics=source_meta(payload),
+            extra_metrics=_metric_meta(payload, available, known),
         )
     )
     return True
@@ -654,7 +947,6 @@ def maybe_add_account_snapshot(db: Session, account: SocialAccount, payload: Col
 
 def find_or_create_content(db: Session, account: SocialAccount, payload: CollectorPayload) -> PublishedContent:
     normalized = normalize_url(payload.url)
-    # Link is the canonical identity in browser-collector mode. This keeps manual/old records from splitting.
     item = db.scalar(select(PublishedContent).where(PublishedContent.url == normalized).limit(1))
     if item is None and payload.content_external_id:
         item = db.scalar(
@@ -671,7 +963,7 @@ def find_or_create_content(db: Session, account: SocialAccount, payload: Collect
             content_type=(payload.content_type or "video")[:48],
             external_id=payload.content_external_id or None,
             url=normalized,
-            published_at=datetime.now(timezone.utc),
+            published_at=now_utc(),
         )
         db.add(item)
         db.flush()
@@ -688,8 +980,8 @@ def find_or_create_content(db: Session, account: SocialAccount, payload: Collect
 
 def maybe_add_content_snapshot(db: Session, item: PublishedContent, payload: CollectorPayload) -> bool:
     metrics = payload.metrics
-    has_content_metric = any(value is not None for value in (metrics.views, metrics.likes, metrics.comments, metrics.saves, metrics.shares))
-    if not has_content_metric:
+    keys = ("views", "likes", "comments", "saves", "shares")
+    if not any(getattr(metrics, key) is not None for key in keys):
         return False
     latest = db.scalar(
         select(ContentMetricSnapshot)
@@ -697,62 +989,145 @@ def maybe_add_content_snapshot(db: Session, item: PublishedContent, payload: Col
         .order_by(ContentMetricSnapshot.captured_at.desc())
         .limit(1)
     )
-    now = datetime.now(timezone.utc)
-    if latest and latest.captured_at and latest.captured_at >= now - timedelta(minutes=30) and same_content_snapshot(latest, metrics):
-        return False
+    values: dict[str, int] = {}
+    known: dict[str, bool] = {}
+    available: dict[str, bool] = {}
+    for key in keys:
+        current = getattr(metrics, key)
+        value, is_known = _merged_value(latest, key, current)
+        values[key] = value
+        known[key] = is_known
+        available[key] = current is not None
+    if latest and latest.captured_at and latest.captured_at >= now_utc() - timedelta(minutes=30):
+        latest_values = {key: int(getattr(latest, key, 0)) for key in keys}
+        latest_known = {key: _legacy_known(latest, key) for key in keys}
+        if values == latest_values and known == latest_known:
+            return False
     db.add(
         ContentMetricSnapshot(
             content_id=item.id,
-            captured_at=now,
-            views=metrics.views or 0,
-            likes=metrics.likes or 0,
-            comments=metrics.comments or 0,
-            saves=metrics.saves or 0,
-            shares=metrics.shares or 0,
+            captured_at=now_utc(),
+            views=values["views"],
+            likes=values["likes"],
+            comments=values["comments"],
+            saves=values["saves"],
+            shares=values["shares"],
             impressions=0,
             reach=0,
-            extra_metrics=source_meta(payload),
+            extra_metrics=_metric_meta(payload, available, known),
         )
     )
     return True
 
 
-def matching_monitor(db: Session, task_url: str, platform: str) -> MonitoredAccount | None:
-    target = normalize_url(task_url)
-    for monitor in db.scalars(
-        select(MonitoredAccount).where(
-            MonitoredAccount.platform == platform,
-            MonitoredAccount.enabled.is_(True),
+def _seen_for_monitor(db: Session, monitor_id: UUID, url: str) -> MonitoredContentSeen | None:
+    return db.scalar(
+        select(MonitoredContentSeen).where(
+            MonitoredContentSeen.monitor_id == monitor_id,
+            MonitoredContentSeen.url == normalize_url(url),
         )
-    ):
-        if target in {normalize_url(url) for url in monitor_task_urls(monitor)}:
-            return monitor
-    return None
+    )
 
 
-def add_discovered_tasks(db: Session, payload: CollectorPayload, monitor: MonitoredAccount | None) -> int:
-    created = 0
-    machine = monitor.machine_name if monitor else ((payload.machine_name or "").strip() or None)
-    seen: set[str] = set()
-    for raw in payload.discovered_urls[:120]:
+def _remember_seen(db: Session, monitor: MonitoredAccount, url: str, *, baseline: bool) -> MonitoredContentSeen:
+    normalized = normalize_url(url)
+    existing = _seen_for_monitor(db, monitor.id, normalized)
+    if existing:
+        return existing
+    item = MonitoredContentSeen(
+        monitor_id=monitor.id,
+        url=normalized,
+        platform=monitor.platform,
+        is_baseline=baseline,
+        first_seen_at=now_utc(),
+    )
+    db.add(item)
+    db.flush()
+    return item
+
+
+def process_discovery(
+    db: Session,
+    payload: CollectorPayload,
+    monitor: MonitoredAccount,
+    feed_url: str,
+) -> tuple[int, bool]:
+    feed = normalize_url(feed_url)
+    discovered: list[str] = []
+    unique: set[str] = set()
+    for raw in payload.discovered_urls[:160]:
         normalized = normalize_url(raw)
-        if not normalized or normalized in seen:
+        if not normalized or normalized in unique or platform_for_url(normalized) != monitor.platform:
             continue
-        seen.add(normalized)
-        platform = platform_for_url(normalized)
-        if platform != payload.platform:
-            continue
-        already_content = db.scalar(select(PublishedContent.id).where(PublishedContent.url == normalized).limit(1))
-        if already_content:
-            continue
-        if add_task(db, normalized, platform, machine):
-            created += 1
-    if monitor:
-        monitor.discovered_count += created
-        monitor.last_checked_at = datetime.now(timezone.utc)
-        monitor.next_check_at = datetime.now(timezone.utc) + timedelta(hours=1)
-        monitor.last_error = None
-    return created
+        unique.add(normalized)
+        discovered.append(normalized)
+    previous_seen = {
+        normalize_url(raw)
+        for raw in payload.previous_seen_urls[:240]
+        if raw and platform_for_url(raw) == monitor.platform
+    }
+    state = db.scalar(
+        select(MonitorFeedState).where(
+            MonitorFeedState.monitor_id == monitor.id,
+            MonitorFeedState.feed_url == feed,
+        )
+    )
+    baseline_ready = state is not None
+    created_tasks = 0
+    new_seen = 0
+
+    if state is None:
+        can_initialize = bool(previous_seen or discovered or payload.feed_empty or payload.metrics.content_count == 0)
+        if not can_initialize:
+            monitor.last_checked_at = now_utc()
+            monitor.next_check_at = now_utc() + BASELINE_RETRY_INTERVAL
+            monitor.last_error = "作品列表尚未确认，未建立基线；系统会自动重试。"
+            return 0, False
+        state = MonitorFeedState(monitor_id=monitor.id, feed_url=feed, initialized_at=now_utc())
+        db.add(state)
+        db.flush()
+        baseline_ready = True
+        if previous_seen:
+            for url in previous_seen:
+                _remember_seen(db, monitor, url, baseline=True)
+            for url in discovered:
+                if url in previous_seen or _seen_for_monitor(db, monitor.id, url):
+                    continue
+                _remember_seen(db, monitor, url, baseline=False)
+                new_seen += 1
+                if db.scalar(select(PublishedContent.id).where(PublishedContent.url == url).limit(1)) is None:
+                    if add_task(db, url, monitor.platform, monitor.machine_name):
+                        created_tasks += 1
+        else:
+            for url in discovered:
+                _remember_seen(db, monitor, url, baseline=True)
+    else:
+        for url in discovered:
+            if _seen_for_monitor(db, monitor.id, url):
+                continue
+            _remember_seen(db, monitor, url, baseline=False)
+            new_seen += 1
+            if db.scalar(select(PublishedContent.id).where(PublishedContent.url == url).limit(1)) is None:
+                if add_task(db, url, monitor.platform, monitor.machine_name):
+                    created_tasks += 1
+
+    monitor.discovered_count += new_seen
+    monitor.last_checked_at = now_utc()
+    monitor.next_check_at = now_utc() + MONITOR_INTERVAL
+    monitor.last_error = None
+    return created_tasks, baseline_ready
+
+
+def _complete_task(task: CollectorTask | None, machine_name: str) -> bool:
+    if task is None or task.status != "processing":
+        return False
+    task.status = "completed"
+    task.completed_at = now_utc()
+    task.started_at = None
+    task.last_error = None
+    if machine_name.strip():
+        task.machine_name = machine_name.strip()[:120]
+    return True
 
 
 @app.post("/ingest", response_model=CollectorResult, dependencies=[Depends(require_collector_token)])
@@ -766,37 +1141,51 @@ def ingest(payload: CollectorPayload, db: Session = Depends(get_db)) -> Collecto
     if platform is None:
         raise HTTPException(status_code=500, detail="Platform catalog is not initialized")
 
+    task: CollectorTask | None = None
+    if payload.task_id:
+        task = db.get(CollectorTask, payload.task_id)
+        if task is None:
+            raise HTTPException(status_code=410, detail="Collector task no longer exists")
+        if task.platform != slug:
+            raise HTTPException(status_code=422, detail="Task platform mismatch")
+
+    monitor: MonitoredAccount | None = None
+    seen: MonitoredContentSeen | None = None
+    if payload.page_type == "account" and task:
+        monitor = _monitor_for_feed(db, task.url, slug)
+        if monitor:
+            payload = payload.model_copy(update={"profile_url": monitor.profile_url, "account_name": monitor.name})
+    elif payload.page_type == "content":
+        monitor, seen = _monitor_for_content(db, payload.url, slug)
+        if monitor:
+            payload = payload.model_copy(update={"profile_url": monitor.profile_url, "account_name": monitor.name})
+
     account = find_or_create_account(db, payload, platform)
-    account_snapshot_created = maybe_add_account_snapshot(db, account, payload)
-    content_id: str | None = None
+    account_snapshot_created = False
     content_snapshot_created = False
-    if payload.page_type == "content":
+    content_id: str | None = None
+    baseline_ready = False
+    discovered_tasks_created = 0
+
+    if payload.page_type == "account":
+        account_snapshot_created = maybe_add_account_snapshot(db, account, payload)
+        if monitor and task:
+            discovered_tasks_created, baseline_ready = process_discovery(db, payload, monitor, task.url)
+    else:
+        if seen and seen.is_baseline:
+            task_completed = _complete_task(task, payload.machine_name)
+            db.commit()
+            return CollectorResult(
+                account_id=str(account.id),
+                content_id=None,
+                baseline_ready=True,
+                task_completed=task_completed,
+            )
         item = find_or_create_content(db, account, payload)
         content_snapshot_created = maybe_add_content_snapshot(db, item, payload)
         content_id = str(item.id)
 
-    task_completed = False
-    discovered_tasks_created = 0
-    task: CollectorTask | None = None
-    if payload.task_id:
-        task = db.get(CollectorTask, payload.task_id)
-    monitor = matching_monitor(db, task.url, slug) if task and payload.page_type == "account" else None
-    if payload.page_type == "account" and payload.discovered_urls:
-        discovered_tasks_created = add_discovered_tasks(db, payload, monitor)
-    elif monitor:
-        monitor.last_checked_at = datetime.now(timezone.utc)
-        monitor.next_check_at = datetime.now(timezone.utc) + timedelta(hours=1)
-        monitor.last_error = None
-
-    if task and task.status == "processing":
-        task.status = "completed"
-        task.completed_at = datetime.now(timezone.utc)
-        task.started_at = None
-        task.last_error = None
-        if payload.machine_name.strip():
-            task.machine_name = payload.machine_name.strip()[:120]
-        task_completed = True
-
+    task_completed = _complete_task(task, payload.machine_name)
     db.commit()
     return CollectorResult(
         account_id=str(account.id),
@@ -804,5 +1193,6 @@ def ingest(payload: CollectorPayload, db: Session = Depends(get_db)) -> Collecto
         account_snapshot_created=account_snapshot_created,
         content_snapshot_created=content_snapshot_created,
         discovered_tasks_created=discovered_tasks_created,
+        baseline_ready=baseline_ready,
         task_completed=task_completed,
     )

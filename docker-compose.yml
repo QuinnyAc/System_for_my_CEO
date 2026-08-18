@@ -61,18 +61,6 @@ services:
     command: uvicorn app.collector_app:app --host 0.0.0.0 --port 8200 --reload
     restart: unless-stopped
 
-  sync-worker:
-    build:
-      context: ./apps/api
-    environment: *api_environment
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - ./apps/api:/app
-    command: python -m app.sync_worker
-    restart: unless-stopped
-
   web:
     build:
       context: ./apps/web

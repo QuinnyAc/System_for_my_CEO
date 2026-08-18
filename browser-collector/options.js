@@ -22,7 +22,7 @@ async function load() {
     const kind = cfg.lastUploadStatus === "success" ? "ok" : cfg.lastUploadStatus === "running" ? "" : "error";
     show(`最近状态：${new Date(cfg.lastUploadAt).toLocaleString()}\n${cfg.lastUploadStatus}\n${cfg.lastUploadMessage || ""}`, kind);
   } else {
-    show("尚无上传记录");
+    show("尚无后台读取记录");
   }
 }
 
@@ -37,9 +37,9 @@ async function save() {
   try {
     await chrome.runtime.sendMessage({ type: "RUN_QUEUE" });
   } catch {
-    // The background worker will also retry from its heartbeat alarm.
+    // The background worker will retry from its heartbeat alarm.
   }
-  show("设置已保存。手动打开页面会采集；网站队列里的链接也会由这台电脑自动依次读取。", "ok");
+  show("设置已保存。扩展只会执行 Media Ops 后台分配的任务；普通手动浏览不会写入数据。", "ok");
   return cfg;
 }
 
@@ -50,7 +50,7 @@ async function test() {
     return;
   }
   try {
-    const health = await fetch(`${cfg.collectorUrl}/health`);
+    const health = await fetch(`${cfg.collectorUrl}/health`, { cache: "no-store" });
     if (!health.ok) throw new Error(`Health ${health.status}`);
 
     const response = await fetch(`${cfg.collectorUrl}/ingest`, {
@@ -72,7 +72,9 @@ async function test() {
       const detail = await response.text();
       if (!response.ok) throw new Error(`${response.status} ${detail.slice(0, 160)}`);
     }
-    show("连接成功。手动采集和自动链接队列都已启用。", "ok");
+    const info = await health.json().catch(() => ({}));
+    const version = info.version ? `\nCollector ${info.version}` : "";
+    show(`连接成功。后台自动读取已启用。${version}`, "ok");
     await chrome.runtime.sendMessage({ type: "RUN_QUEUE" }).catch(() => null);
   } catch (error) {
     show(`连接失败：${error instanceof Error ? error.message : String(error)}`, "error");

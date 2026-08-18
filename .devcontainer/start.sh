@@ -19,7 +19,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 echo "Starting Media Ops..."
-docker compose up -d --build
+docker compose up -d --build --remove-orphans
 
 wait_for_url() {
   local url="$1"
@@ -32,12 +32,13 @@ wait_for_url() {
     sleep 2
   done
   echo "$label did not become ready in time: $url" >&2
+  docker compose ps >&2 || true
   return 1
 }
 
-wait_for_url "http://localhost:3100/" "Web"
 wait_for_url "http://localhost:8100/health" "API"
 wait_for_url "http://localhost:8200/health" "Browser collector"
+wait_for_url "http://localhost:3100/login" "Web"
 wait_for_url "http://localhost:3100/collector/health" "Collector web proxy"
 
 if [[ -n "${CODESPACE_NAME:-}" ]]; then

@@ -9,7 +9,8 @@ const CURRENT_TASK_KEY = "queueCurrentTask";
 const POLL_ALARM = "queue-poll";
 const HEARTBEAT_ALARM = "queue-heartbeat";
 const TIMEOUT_ALARM = "queue-timeout";
-const BASELINE_PREFIX = "monitorBaseline::";
+const LEGACY_BASELINE_PREFIX = "monitorBaseline::";
+let pollInFlight = false;
 
 async function settings() {
   return chrome.storage.local.get(DEFAULTS);
@@ -22,87 +23,53 @@ function endpoint(cfg, path) {
 function canonicalUrl(value) {
   try {
     const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+    url.hostname = host;
     url.hash = "";
-    if (url.hostname.replace(/^www\./, "").endsWith("youtube.com") && url.pathname === "/watch") {
+    url.pathname = url.pathname.replace(/\/$/, "") || "/";
+
+    if (host.endsWith("youtube.com") && url.pathname === "/watch") {
       const videoId = url.searchParams.get("v") || "";
       url.search = videoId ? `?v=${encodeURIComponent(videoId)}` : "";
+    } else if (host.endsWith("facebook.com")) {
+      const original = new URL(value);
+      const keep = new URLSearchParams();
+      if (url.pathname === "/watch" && original.searchParams.get("v")) {
+        keep.set("v", original.searchParams.get("v"));
+      } else if (url.pathname.endsWith("/profile.php") && original.searchParams.get("id")) {
+        keep.set("id", original.searchParams.get("id"));
+      } else if (original.searchParams.get("story_fbid")) {
+        keep.set("story_fbid", original.searchParams.get("story_fbid"));
+        if (original.searchParams.get("id")) keep.set("id", original.searchParams.get("id"));
+      } else if (original.searchParams.get("fbid")) {
+        keep.set("fbid", original.searchParams.get("fbid"));
+        if (original.searchParams.get("id")) keep.set("id", original.searchParams.get("id"));
+      }
+      url.search = keep.toString() ? `?${keep.toString()}` : "";
     } else {
       url.search = "";
     }
-    url.hostname = url.hostname.replace(/^www\./, "");
-    url.pathname = url.pathname.replace(/\/$/, "") || "/";
     return url.toString();
   } catch {
     return String(value || "").trim();
   }
 }
 
-function baselineKey(feedUrl) {
-  return `${BASELINE_PREFIX}${canonicalUrl(feedUrl)}`;
+function legacyBaselineKey(feedUrl) {
+  return `${LEGACY_BASELINE_PREFIX}${canonicalUrl(feedUrl)}`;
 }
 
-function looksLikeContentUrl(value) {
-  try {
-    const url = new URL(value);
-    const host = url.hostname.replace(/^www\./, "").toLowerCase();
-    const path = url.pathname;
-    if (host.endsWith("youtube.com") || host === "youtu.be") return path === "/watch" || path.startsWith("/shorts/") || host === "youtu.be";
-    if (host.endsWith("instagram.com")) return path.startsWith("/p/") || path.startsWith("/reel/");
-    if (host.endsWith("facebook.com") || host === "fb.watch") return /\/(posts|videos|reel|watch|photo|permalink)\b/i.test(path) || url.searchParams.has("story_fbid") || host === "fb.watch";
-    if (host.endsWith("pinterest.com") || host === "pin.it") return path.startsWith("/pin/") || host === "pin.it";
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-async function hasAnyMonitorBaseline() {
-  const stored = await chrome.storage.local.get(null);
-  return Object.keys(stored).some((key) => key.startsWith(BASELINE_PREFIX));
-}
-
-async function applyMonitorBaseline(current, payload) {
-  if (payload?.page_type !== "account") return payload;
-  const discovered = [...new Set((payload.discovered_urls || []).map(canonicalUrl).filter(Boolean))];
-  const key = baselineKey(current.url);
+async function legacySeenUrls(feedUrl) {
+  const key = legacyBaselineKey(feedUrl);
   const stored = await chrome.storage.local.get(key);
   const state = stored[key];
-
-  if (!state) {
-    await chrome.storage.local.set({
-      [key]: {
-        baseline: discovered,
-        seen: discovered,
-        initializedAt: new Date().toISOString()
-      }
-    });
-    return { ...payload, discovered_urls: [] };
-  }
-
-  const baseline = Array.isArray(state.baseline) ? state.baseline : [];
-  const seen = new Set(Array.isArray(state.seen) ? state.seen : baseline);
-  const newUrls = discovered.filter((url) => !seen.has(url));
-  discovered.forEach((url) => seen.add(url));
-  await chrome.storage.local.set({
-    [key]: {
-      ...state,
-      baseline,
-      seen: [...seen],
-      lastCheckedAt: new Date().toISOString()
-    }
-  });
-  return { ...payload, discovered_urls: newUrls };
+  if (!state) return [];
+  const seen = Array.isArray(state.seen) ? state.seen : Array.isArray(state.baseline) ? state.baseline : [];
+  return [...new Set(seen.map(canonicalUrl).filter(Boolean))].slice(0, 240);
 }
 
-async function isBaselineContentUrl(value) {
-  const target = canonicalUrl(value);
-  if (!target) return false;
-  const stored = await chrome.storage.local.get(null);
-  for (const [key, state] of Object.entries(stored)) {
-    if (!key.startsWith(BASELINE_PREFIX) || !state || !Array.isArray(state.baseline)) continue;
-    if (state.baseline.includes(target)) return true;
-  }
-  return false;
+async function clearLegacyBaseline(feedUrl) {
+  await chrome.storage.local.remove(legacyBaselineKey(feedUrl));
 }
 
 async function collectorFetch(cfg, path, options = {}) {
@@ -132,7 +99,7 @@ async function closeTaskTab(current) {
   try {
     await chrome.tabs.remove(current.tabId);
   } catch {
-    // The user or browser may already have closed it.
+    // It may already be closed.
   }
 }
 
@@ -158,7 +125,7 @@ async function failCurrentTask(reason) {
   try {
     await reportTaskFailure(cfg, current.taskId, reason);
   } catch {
-    // Server also releases stale processing tasks, so do not trap the extension here.
+    // The server also releases stale tasks.
   }
   await clearCurrentTask(current, true);
   await chrome.storage.local.set({
@@ -166,76 +133,74 @@ async function failCurrentTask(reason) {
     lastUploadStatus: "error",
     lastUploadMessage: `自动任务失败：${reason || "未读取到数据"}`
   });
-  await schedulePoll(15_000);
+  await schedulePoll(12_000);
+}
+
+async function finishBaselineWait() {
+  const current = await getCurrentTask();
+  if (!current) return;
+  await clearCurrentTask(current, true);
+  await chrome.storage.local.set({
+    lastUploadAt: new Date().toISOString(),
+    lastUploadStatus: "success",
+    lastUploadMessage: "账号作品列表本次未完全加载，后台会按计划自动重试"
+  });
+  await schedulePoll(6_000);
 }
 
 async function pollQueue() {
-  const cfg = await settings();
-  if (!cfg.enabled || !cfg.collectorUrl || !cfg.token) return;
-
-  const current = await getCurrentTask();
-  if (current) {
-    try {
-      await chrome.tabs.get(current.tabId);
-      return;
-    } catch {
-      await failCurrentTask("自动采集标签页被关闭");
-      return;
-    }
-  }
-
+  if (pollInFlight) return;
+  pollInFlight = true;
   try {
-    const query = `?machine_name=${encodeURIComponent(cfg.machineName || "")}`;
-    const result = await collectorFetch(cfg, `/tasks/next${query}`);
-    const task = result?.task;
-    if (!task) {
-      await schedulePoll(60_000);
-      return;
+    const cfg = await settings();
+    if (!cfg.enabled || !cfg.collectorUrl || !cfg.token) return;
+
+    const current = await getCurrentTask();
+    if (current) {
+      try {
+        await chrome.tabs.get(current.tabId);
+        return;
+      } catch {
+        await failCurrentTask("自动采集标签页被关闭");
+        return;
+      }
     }
 
-    if (looksLikeContentUrl(task.url) && !(await hasAnyMonitorBaseline())) {
-      try {
-        await reportTaskFailure(cfg, task.id, "等待首次账号基线，旧作品不登记");
-      } catch {}
-      await schedulePoll(1_500);
-      return;
-    }
+    try {
+      const query = `?machine_name=${encodeURIComponent(cfg.machineName || "")}`;
+      const result = await collectorFetch(cfg, `/tasks/next${query}`);
+      const task = result?.task;
+      if (!task) {
+        await schedulePoll(15_000);
+        return;
+      }
 
-    if (await isBaselineContentUrl(task.url)) {
-      try {
-        await reportTaskFailure(cfg, task.id, "基线旧作品，按设置跳过");
-      } catch {}
+      const tab = await chrome.tabs.create({ url: task.url, active: false });
+      const queueState = {
+        taskId: task.id,
+        tabId: tab.id,
+        url: task.url,
+        platform: task.platform,
+        waitingForBaseline: false,
+        startedAt: new Date().toISOString()
+      };
+      await chrome.storage.local.set({ [CURRENT_TASK_KEY]: queueState });
+      await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + 75_000 });
       await chrome.storage.local.set({
         lastUploadAt: new Date().toISOString(),
-        lastUploadStatus: "success",
-        lastUploadMessage: "已跳过登记账号之前的旧作品"
+        lastUploadStatus: "running",
+        lastUploadMessage: `自动读取：${task.platform}`
       });
-      await schedulePoll(1_500);
-      return;
+    } catch (error) {
+      await chrome.storage.local.set({
+        lastUploadAt: new Date().toISOString(),
+        lastUploadStatus: "error",
+        lastUploadMessage: `读取任务队列失败：${error instanceof Error ? error.message : String(error)}`
+      });
+      await schedulePoll(30_000);
     }
-
-    const tab = await chrome.tabs.create({ url: task.url, active: false });
-    const queueState = {
-      taskId: task.id,
-      tabId: tab.id,
-      url: task.url,
-      platform: task.platform,
-      startedAt: new Date().toISOString()
-    };
-    await chrome.storage.local.set({ [CURRENT_TASK_KEY]: queueState });
-    await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + 60_000 });
-    await chrome.storage.local.set({
-      lastUploadAt: new Date().toISOString(),
-      lastUploadStatus: "running",
-      lastUploadMessage: `自动读取：${task.platform}`
-    });
-  } catch (error) {
-    await chrome.storage.local.set({
-      lastUploadAt: new Date().toISOString(),
-      lastUploadStatus: "error",
-      lastUploadMessage: `读取任务队列失败：${error instanceof Error ? error.message : String(error)}`
-    });
-    await schedulePoll(60_000);
+  } finally {
+    pollInFlight = false;
   }
 }
 
@@ -244,7 +209,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     pollQueue().then(() => sendResponse({ ok: true })).catch((error) => sendResponse({ ok: false, error: String(error) }));
     return true;
   }
-
   if (message?.type !== "PUBLIC_METRICS") return;
 
   (async () => {
@@ -265,19 +229,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
-    if (message.payload?.page_type === "content" && await isBaselineContentUrl(current.url)) {
-      try {
-        await reportTaskFailure(cfg, current.taskId, "基线旧作品，按设置跳过");
-      } catch {}
-      await clearCurrentTask(current, true);
-      await schedulePoll(1_500);
-      sendResponse({ ok: true, skipped: true, reason: "baseline_old_content" });
-      return;
-    }
-
-    const baselinePayload = await applyMonitorBaseline(current, message.payload);
+    const previousSeen = message.payload?.page_type === "account"
+      ? await legacySeenUrls(current.url)
+      : [];
     const payload = {
-      ...baselinePayload,
+      ...message.payload,
+      previous_seen_urls: previousSeen,
       machine_name: cfg.machineName || "",
       collector_version: chrome.runtime.getManifest().version,
       task_id: current.taskId
@@ -289,28 +246,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
+
+      if (payload.page_type === "account" && !result?.baseline_ready) {
+        await chrome.storage.local.set({
+          [CURRENT_TASK_KEY]: { ...current, waitingForBaseline: true },
+          lastUploadAt: new Date().toISOString(),
+          lastUploadStatus: "running",
+          lastUploadMessage: "账号数据已读取，继续等待作品列表完成加载"
+        });
+        await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + 45_000 });
+        sendResponse({ ok: true, result, waiting: true });
+        return;
+      }
+
+      if (payload.page_type === "account" && result?.baseline_ready) {
+        await clearLegacyBaseline(current.url);
+      }
       await chrome.storage.local.set({
         lastUploadAt: new Date().toISOString(),
         lastUploadStatus: "success",
         lastUploadMessage: payload.page_type === "account"
-          ? "账号数据已同步；仅新增作品会进入内容数据"
+          ? "账号数据已同步；服务器已维护新增作品基线"
           : `自动任务完成：${payload.platform}`
       });
-
       await clearCurrentTask(current, true);
-      await schedulePoll(12_000);
+      await schedulePoll(6_000);
       sendResponse({ ok: true, result });
     } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
       await chrome.storage.local.set({
         lastUploadAt: new Date().toISOString(),
         lastUploadStatus: "error",
-        lastUploadMessage: error instanceof Error ? error.message : String(error)
+        lastUploadMessage: reason
       });
-      await failCurrentTask(error instanceof Error ? error.message : String(error));
-      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      await failCurrentTask(reason);
+      sendResponse({ ok: false, error: reason });
     }
   })();
-
   return true;
 });
 
@@ -318,7 +290,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM || alarm.name === HEARTBEAT_ALARM) {
     pollQueue().catch(() => null);
   } else if (alarm.name === TIMEOUT_ALARM) {
-    failCurrentTask("页面在 60 秒内没有读取到公开数据").catch(() => null);
+    getCurrentTask().then((current) => {
+      if (current?.waitingForBaseline) return finishBaselineWait();
+      return failCurrentTask("页面在 75 秒内没有读取到公开数据");
+    }).catch(() => null);
   }
 });
 

@@ -8,6 +8,7 @@ import httpx
 META_SCOPES = [
     "pages_show_list",
     "pages_read_engagement",
+    "pages_read_user_content",
     "read_insights",
     "instagram_basic",
     "instagram_manage_insights",
@@ -120,163 +121,149 @@ def resolve_managed_asset(*, platform_slug: str, account_external_id: str | None
         candidates = []
         for page in pages:
             ig = page.get("instagram_business_account") or {}
-            if ig.get("id"):
-                candidates.append({**ig, "page_id": page.get("id"), "page_name": page.get("name"), "access_token": page.get("access_token")})
+            if ig:
+                candidates.append({**ig, "access_token": page.get("access_token"), "page_id": page.get("id")})
         id_key = "id"
         handle_key = "username"
     else:
-        raise MetaApiError("该账号不是 Meta 支持的平台账号。")
+        raise MetaApiError("Meta 平台不支持。")
 
     if account_external_id:
-        for item in candidates:
-            if str(item.get(id_key) or "") == account_external_id:
-                return item
-
-    normalized_handle = (handle or "").lstrip("@").strip().lower()
+        for candidate in candidates:
+            if str(candidate.get(id_key) or "") == str(account_external_id):
+                return candidate
+    normalized_handle = (handle or "").lstrip("@").lower()
     if normalized_handle:
-        for item in candidates:
-            if str(item.get(handle_key) or "").lstrip("@").strip().lower() == normalized_handle:
-                return item
-
+        for candidate in candidates:
+            if str(candidate.get(handle_key) or "").lstrip("@").lower() == normalized_handle:
+                return candidate
     normalized_name = account_name.strip().lower()
-    for item in candidates:
-        if str(item.get("name") or item.get("page_name") or "").strip().lower() == normalized_name:
-            return item
-
+    if normalized_name:
+        for candidate in candidates:
+            if str(candidate.get("name") or "").strip().lower() == normalized_name:
+                return candidate
     if len(candidates) == 1:
         return candidates[0]
-
-    if not candidates:
-        if platform_slug == "instagram":
-            raise MetaApiError("没有找到已连接到 Facebook Page 的 Instagram Professional 账号。")
-        raise MetaApiError("当前 Meta 用户没有返回可管理的 Facebook Page。")
-    raise MetaApiError("检测到多个可管理账号，请先在账号记录中填写准确的平台内部 ID 或 Handle 后重新授权。")
+    raise MetaApiError("无法唯一识别要连接的 Meta 账号。请填写准确的平台 ID 或用户名后重试。")
 
 
-def fetch_facebook_page(page_id: str, page_access_token: str, graph_version: str) -> dict:
-    return _get(page_id, page_access_token, graph_version, params={"fields": "id,name,fan_count,followers_count"})
+def fetch_facebook_page(page_id: str, access_token: str, graph_version: str) -> dict:
+    return _get(page_id, access_token, graph_version, params={"fields": "id,name,followers_count,fan_count"})
 
 
-def fetch_instagram_profile(ig_id: str, page_access_token: str, graph_version: str) -> dict:
-    return _get(ig_id, page_access_token, graph_version, params={"fields": "id,username,name,followers_count,media_count"})
+def fetch_instagram_profile(account_id: str, access_token: str, graph_version: str) -> dict:
+    return _get(account_id, access_token, graph_version, params={"fields": "id,username,name,followers_count,media_count"})
 
 
-def _safe_insight(object_id: str, metric: str, token: str, graph_version: str, *, period: str | None = None) -> int:
-    params: dict[str, str] = {"metric": metric}
-    if period:
-        params["period"] = period
-    try:
-        payload = _get(f"{object_id}/insights", token, graph_version, params=params)
-    except MetaApiError:
-        return 0
-    data = payload.get("data") or []
-    if not data:
-        return 0
-    item = data[0]
-    if isinstance(item.get("total_value"), dict):
-        try:
-            return int(float(item["total_value"].get("value") or 0))
-        except (TypeError, ValueError):
-            return 0
-    values = item.get("values") or []
-    if values:
-        try:
-            return int(float(values[-1].get("value") or 0))
-        except (TypeError, ValueError):
-            return 0
+def list_facebook_content(page_id: str, access_token: str, graph_version: str, *, limit: int = 25) -> list[dict]:
+    payload = _get(
+        f"{page_id}/published_posts",
+        access_token,
+        graph_version,
+        params={"fields": "id,message,created_time,permalink_url", "limit": min(max(limit, 1), 50)},
+    )
+    return list(payload.get("data") or [])
+
+
+def list_instagram_content(account_id: str, access_token: str, graph_version: str, *, limit: int = 25) -> list[dict]:
+    payload = _get(
+        f"{account_id}/media",
+        access_token,
+        graph_version,
+        params={
+            "fields": "id,caption,media_type,media_product_type,permalink,timestamp",
+            "limit": min(max(limit, 1), 50),
+        },
+    )
+    return list(payload.get("data") or [])
+
+
+def _metric_value(payload: dict, name: str) -> int:
+    for item in payload.get("data") or []:
+        if str(item.get("name") or "") != name:
+            continue
+        values = item.get("values") or []
+        if values:
+            raw = values[0].get("value")
+            if isinstance(raw, (int, float)):
+                return int(raw)
     return 0
 
 
-def facebook_account_snapshot(profile: dict, page_access_token: str, graph_version: str) -> dict:
+def facebook_account_snapshot(profile: dict, access_token: str, graph_version: str) -> dict:
     page_id = str(profile.get("id") or "")
-    followers = int(profile.get("followers_count") or profile.get("fan_count") or 0)
+    insights = _get(
+        f"{page_id}/insights",
+        access_token,
+        graph_version,
+        params={"metric": "page_impressions,page_post_engagements", "period": "day"},
+    ) if page_id else {"data": []}
     return {
-        "followers": followers,
-        "views": _safe_insight(page_id, "page_views_total", page_access_token, graph_version, period="day"),
-        "impressions": _safe_insight(page_id, "page_impressions", page_access_token, graph_version, period="day"),
-        "reach": _safe_insight(page_id, "page_impressions_unique", page_access_token, graph_version, period="day"),
-        "engagements": _safe_insight(page_id, "page_post_engagements", page_access_token, graph_version, period="day"),
+        "followers": int(profile.get("followers_count") or profile.get("fan_count") or 0),
+        "views": 0,
+        "impressions": _metric_value(insights, "page_impressions"),
+        "reach": 0,
+        "engagements": _metric_value(insights, "page_post_engagements"),
         "content_count": 0,
-        "extra_metrics": {"source": "meta_graph_api", "fan_count": int(profile.get("fan_count") or 0)},
+        "extra_metrics": {"provider": "meta"},
     }
 
 
-def instagram_account_snapshot(profile: dict, page_access_token: str, graph_version: str) -> dict:
-    ig_id = str(profile.get("id") or "")
+def instagram_account_snapshot(profile: dict, access_token: str, graph_version: str) -> dict:
+    account_id = str(profile.get("id") or "")
+    insights = _get(
+        f"{account_id}/insights",
+        access_token,
+        graph_version,
+        params={"metric": "views,reach,accounts_engaged", "period": "day"},
+    ) if account_id else {"data": []}
     return {
         "followers": int(profile.get("followers_count") or 0),
-        "views": _safe_insight(ig_id, "profile_views", page_access_token, graph_version, period="day"),
+        "views": _metric_value(insights, "views"),
         "impressions": 0,
-        "reach": _safe_insight(ig_id, "reach", page_access_token, graph_version, period="day"),
-        "engagements": _safe_insight(ig_id, "total_interactions", page_access_token, graph_version, period="day"),
+        "reach": _metric_value(insights, "reach"),
+        "engagements": _metric_value(insights, "accounts_engaged"),
         "content_count": int(profile.get("media_count") or 0),
-        "extra_metrics": {
-            "source": "instagram_graph_api",
-            "accounts_engaged": _safe_insight(ig_id, "accounts_engaged", page_access_token, graph_version, period="day"),
-        },
+        "extra_metrics": {"provider": "meta"},
     }
 
 
-def list_facebook_content(page_id: str, page_access_token: str, graph_version: str, *, limit: int = 25) -> list[dict]:
-    payload = _get(
-        f"{page_id}/published_posts",
-        page_access_token,
+def facebook_content_snapshot(post_id: str, access_token: str, graph_version: str) -> dict:
+    reactions = _get(f"{post_id}/reactions", access_token, graph_version, params={"summary": "total_count", "limit": 0})
+    comments = _get(f"{post_id}/comments", access_token, graph_version, params={"summary": "total_count", "limit": 0})
+    insights = _get(
+        f"{post_id}/insights",
+        access_token,
         graph_version,
-        params={"fields": "id,message,permalink_url,created_time", "limit": str(min(max(limit, 1), 100))},
+        params={"metric": "post_impressions,post_impressions_unique,post_engaged_users"},
     )
-    return list(payload.get("data") or [])
-
-
-def list_instagram_content(ig_id: str, page_access_token: str, graph_version: str, *, limit: int = 25) -> list[dict]:
-    payload = _get(
-        f"{ig_id}/media",
-        page_access_token,
-        graph_version,
-        params={"fields": "id,caption,media_type,media_product_type,permalink,timestamp", "limit": str(min(max(limit, 1), 100))},
-    )
-    return list(payload.get("data") or [])
-
-
-def facebook_content_snapshot(post_id: str, page_access_token: str, graph_version: str) -> dict:
-    basic = _get(
-        post_id,
-        page_access_token,
-        graph_version,
-        params={"fields": "reactions.limit(0).summary(true),comments.limit(0).summary(true),shares"},
-    )
-    reactions = (((basic.get("reactions") or {}).get("summary") or {}).get("total_count") or 0)
-    comments = (((basic.get("comments") or {}).get("summary") or {}).get("total_count") or 0)
-    shares = ((basic.get("shares") or {}).get("count") or 0)
-    impressions = _safe_insight(post_id, "post_impressions", page_access_token, graph_version)
-    reach = _safe_insight(post_id, "post_impressions_unique", page_access_token, graph_version)
-    video_views = _safe_insight(post_id, "post_video_views", page_access_token, graph_version)
-    engagements = _safe_insight(post_id, "post_engaged_users", page_access_token, graph_version)
     return {
-        "views": video_views or impressions,
-        "likes": int(reactions),
-        "comments": int(comments),
+        "views": _metric_value(insights, "post_impressions"),
+        "likes": int((reactions.get("summary") or {}).get("total_count") or 0),
+        "comments": int((comments.get("summary") or {}).get("total_count") or 0),
         "saves": 0,
-        "shares": int(shares),
-        "impressions": impressions,
-        "reach": reach,
-        "extra_metrics": {"source": "meta_graph_api", "engaged_users": engagements, "video_views": video_views},
+        "shares": 0,
+        "impressions": _metric_value(insights, "post_impressions"),
+        "reach": _metric_value(insights, "post_impressions_unique"),
+        "extra_metrics": {"engaged_users": _metric_value(insights, "post_engaged_users"), "provider": "meta"},
     }
 
 
-def instagram_content_snapshot(media_id: str, page_access_token: str, graph_version: str) -> dict:
-    basic = _get(media_id, page_access_token, graph_version, params={"fields": "id,like_count,comments_count,media_type,media_product_type"})
-    views = _safe_insight(media_id, "views", page_access_token, graph_version)
-    reach = _safe_insight(media_id, "reach", page_access_token, graph_version)
-    shares = _safe_insight(media_id, "shares", page_access_token, graph_version)
-    saves = _safe_insight(media_id, "saved", page_access_token, graph_version)
-    total_interactions = _safe_insight(media_id, "total_interactions", page_access_token, graph_version)
+def instagram_content_snapshot(media_id: str, access_token: str, graph_version: str) -> dict:
+    media = _get(media_id, access_token, graph_version, params={"fields": "like_count,comments_count,media_product_type"})
+    insights = _get(
+        f"{media_id}/insights",
+        access_token,
+        graph_version,
+        params={"metric": "views,reach,saved,shares"},
+    )
     return {
-        "views": views,
-        "likes": int(basic.get("like_count") or 0),
-        "comments": int(basic.get("comments_count") or 0),
-        "saves": saves,
-        "shares": shares,
+        "views": _metric_value(insights, "views"),
+        "likes": int(media.get("like_count") or 0),
+        "comments": int(media.get("comments_count") or 0),
+        "saves": _metric_value(insights, "saved"),
+        "shares": _metric_value(insights, "shares"),
         "impressions": 0,
-        "reach": reach,
-        "extra_metrics": {"source": "instagram_graph_api", "total_interactions": total_interactions},
+        "reach": _metric_value(insights, "reach"),
+        "extra_metrics": {"provider": "meta", "media_product_type": media.get("media_product_type")},
     }
