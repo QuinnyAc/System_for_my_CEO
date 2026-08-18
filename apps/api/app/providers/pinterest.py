@@ -47,7 +47,12 @@ def exchange_code(code: str, client_id: str, client_secret: str, redirect_uri: s
         response = httpx.post(
             TOKEN_URL,
             auth=(client_id, client_secret),
-            data={"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "continuous_refresh": "true",
+            },
             timeout=15,
         )
         response.raise_for_status()
