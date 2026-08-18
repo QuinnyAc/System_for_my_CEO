@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     app_password: str = "change-me-now"
     session_secret: str = "development-only-zeno-session-secret"
     credentials_secret: str = "development-only-zeno-credentials-secret"
+    auto_sync_enabled: bool = False
+    auto_sync_interval_minutes: int = 60
 
     # Google / YouTube
     youtube_api_key: str = ""
@@ -64,6 +66,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def production_security(self) -> "Settings":
+        if self.auto_sync_interval_minutes < 5:
+            raise ValueError("AUTO_SYNC_INTERVAL_MINUTES must be at least 5")
         if self.app_env == "production":
             weak_values = {
                 "change-me-now",
