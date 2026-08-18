@@ -59,6 +59,9 @@ set_env_value() {
   mv "$tmp" .env
 }
 
+# Keep the requested application username in every Codespace without storing the password in Git.
+set_env_value "APP_USERNAME" "Quinny/WR"
+
 if replace_placeholder "APP_PASSWORD" "GENERATE_ON_SETUP" "$APP_PASSWORD"; then
   GENERATED_LOGIN=true
 fi
