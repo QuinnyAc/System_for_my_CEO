@@ -76,6 +76,9 @@ jobs:
           }
           console.log(`collector version ${manifest.version} consistent`);
           NODE
+      - name: Package collector ZIP
+        run: bash .devcontainer/package-browser-collector.sh
+      - run: test -s media-ops-public-collector.zip
 
   compose:
     runs-on: ubuntu-latest
