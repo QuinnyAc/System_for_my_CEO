@@ -6,10 +6,23 @@ import type { ContentMetric, Platform, PublishedContent, SocialAccount } from "@
 
 function contentTypeLabel(type: string, platformSlug?: string) {
   if (platformSlug === "youtube") return type === "short" ? "YouTube 短视频" : "YouTube 长视频";
+  if (platformSlug === "instagram") return type === "short" ? "Instagram Reel" : "Instagram Post";
+  if (platformSlug === "facebook") return type === "short" ? "Facebook Reel" : type === "video" ? "Facebook Video" : "Facebook Post";
+  if (platformSlug === "pinterest") return "Pinterest Pin";
   if (type === "short") return "Short / Reel";
   if (type === "post") return "Post";
   if (type === "pin") return "Pin";
   return "Video";
+}
+
+function metricText(metric: ContentMetric, platformSlug?: string) {
+  const dash = "—";
+  const views = platformSlug === "pinterest" ? dash : formatNumber(metric.views);
+  const likes = platformSlug === "pinterest" ? dash : formatNumber(metric.likes);
+  const saves = platformSlug === "pinterest" ? formatNumber(metric.saves) : dash;
+  const comments = formatNumber(metric.comments);
+  const shares = platformSlug === "facebook" ? formatNumber(metric.shares) : dash;
+  return `${views} 播放/浏览 · ${likes} 点赞 · ${saves} 收藏 · ${comments} 评论 · ${shares} 分享`;
 }
 
 export default function ContentPage() {
@@ -50,7 +63,7 @@ export default function ContentPage() {
         <div>
           <div className="eyebrow">Published Content</div>
           <h1>内容数据</h1>
-          <p>账号添加后，系统会自动发现登记之后发布的新作品，并在这里持续更新公开可见的数据。</p>
+          <p>账号添加后，系统会自动发现登记之后发布的新作品，并在这里持续更新公开可见的数据。平台未公开的指标显示为 —。</p>
         </div>
       </header>
       {error ? <div className="error">{error}</div> : null}
@@ -68,7 +81,7 @@ export default function ContentPage() {
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div className="rowTitle">{item.title} <span className="pill">{contentTypeLabel(item.content_type, platform?.slug)}</span></div>
                     <div className="rowMeta">{account?.name} · {platform?.name || "Platform"}</div>
-                    {m ? <div className="rowMeta" style={{ marginTop: 6 }}>{formatNumber(m.views)} 播放 · {formatNumber(m.likes)} 点赞 · {formatNumber(m.saves)} 收藏 · {formatNumber(m.comments)} 评论 · {formatNumber(m.shares)} 分享</div> : <div className="rowMeta" style={{ marginTop: 6 }}>等待首次数据快照</div>}
+                    {m ? <div className="rowMeta" style={{ marginTop: 6 }}>{metricText(m, platform?.slug)}</div> : <div className="rowMeta" style={{ marginTop: 6 }}>等待首次数据快照</div>}
                     {m ? <div className="rowMeta" style={{ marginTop: 4 }}>最近更新：{new Date(m.captured_at).toLocaleString()}</div> : null}
                   </div>
                   <div style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
