@@ -71,9 +71,12 @@ if [[ "${CODESPACES:-false}" == "true" ]]; then
   set_env_value "CORS_ORIGINS" "$WEB_URL"
 fi
 
+APP_USERNAME_VALUE="$(sed -n 's/^APP_USERNAME=//p' .env | head -n1)"
+APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-admin}"
+
 if [[ "$GENERATED_LOGIN" == "true" ]]; then
   echo "Media Ops initial login created."
-  echo "Username: admin"
+  echo "Username: ${APP_USERNAME_VALUE}"
   echo "Password: ${APP_PASSWORD}"
   echo "You can read it later from APP_PASSWORD in this repository's local .env file."
 fi
