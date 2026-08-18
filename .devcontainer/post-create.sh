@@ -70,6 +70,13 @@ replace_placeholder "SESSION_SECRET" "GENERATE_ON_SETUP" "$SESSION_SECRET" || tr
 replace_placeholder "CREDENTIALS_SECRET" "GENERATE_ON_SETUP" "$CREDENTIALS_SECRET" || true
 replace_placeholder "COLLECTOR_TOKEN" "GENERATE_ON_SETUP" "$COLLECTOR_TOKEN" || true
 
+# Existing Codespaces may have an older .env created before the browser collector
+# was added. Initialize the token if the key is missing or empty.
+CURRENT_COLLECTOR_TOKEN="$(sed -n 's/^COLLECTOR_TOKEN=//p' .env | head -n1)"
+if [[ -z "$CURRENT_COLLECTOR_TOKEN" || "$CURRENT_COLLECTOR_TOKEN" == "GENERATE_ON_SETUP" ]]; then
+  set_env_value "COLLECTOR_TOKEN" "$COLLECTOR_TOKEN"
+fi
+
 if [[ -n "${CODESPACE_NAME:-}" ]]; then
   PORT_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
   WEB_URL="https://${CODESPACE_NAME}-3100.${PORT_DOMAIN}"
