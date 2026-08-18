@@ -9,6 +9,7 @@ const CURRENT_TASK_KEY = "queueCurrentTask";
 const POLL_ALARM = "queue-poll";
 const HEARTBEAT_ALARM = "queue-heartbeat";
 const TIMEOUT_ALARM = "queue-timeout";
+const BASELINE_PREFIX = "monitorBaseline::";
 
 async function settings() {
   return chrome.storage.local.get(DEFAULTS);
@@ -16,6 +17,72 @@ async function settings() {
 
 function endpoint(cfg, path) {
   return `${cfg.collectorUrl.replace(/\/$/, "")}${path}`;
+}
+
+function canonicalUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    if (url.hostname.replace(/^www\./, "").endsWith("youtube.com") && url.pathname === "/watch") {
+      const videoId = url.searchParams.get("v") || "";
+      url.search = videoId ? `?v=${encodeURIComponent(videoId)}` : "";
+    } else {
+      url.search = "";
+    }
+    url.hostname = url.hostname.replace(/^www\./, "");
+    url.pathname = url.pathname.replace(/\/$/, "") || "/";
+    return url.toString();
+  } catch {
+    return String(value || "").trim();
+  }
+}
+
+function baselineKey(feedUrl) {
+  return `${BASELINE_PREFIX}${canonicalUrl(feedUrl)}`;
+}
+
+async function applyMonitorBaseline(current, payload) {
+  if (payload?.page_type !== "account") return payload;
+  const discovered = [...new Set((payload.discovered_urls || []).map(canonicalUrl).filter(Boolean))];
+  const key = baselineKey(current.url);
+  const stored = await chrome.storage.local.get(key);
+  const state = stored[key];
+
+  if (!state) {
+    await chrome.storage.local.set({
+      [key]: {
+        baseline: discovered,
+        seen: discovered,
+        initializedAt: new Date().toISOString()
+      }
+    });
+    return { ...payload, discovered_urls: [] };
+  }
+
+  const baseline = Array.isArray(state.baseline) ? state.baseline : [];
+  const seen = new Set(Array.isArray(state.seen) ? state.seen : baseline);
+  const newUrls = discovered.filter((url) => !seen.has(url));
+  discovered.forEach((url) => seen.add(url));
+  await chrome.storage.local.set({
+    [key]: {
+      ...state,
+      baseline,
+      seen: [...seen],
+      lastCheckedAt: new Date().toISOString()
+    }
+  });
+  return { ...payload, discovered_urls: newUrls };
+}
+
+async function isBaselineContentUrl(value) {
+  const target = canonicalUrl(value);
+  if (!target) return false;
+  const stored = await chrome.storage.local.get(null);
+  for (const [key, state] of Object.entries(stored)) {
+    if (!key.startsWith(BASELINE_PREFIX) || !state || !Array.isArray(state.baseline)) continue;
+    if (state.baseline.includes(target)) return true;
+  }
+  return false;
 }
 
 async function collectorFetch(cfg, path, options = {}) {
@@ -51,10 +118,17 @@ async function closeTaskTab(current) {
 
 async function clearCurrentTask(current, closeTab = true) {
   await chrome.alarms.clear(TIMEOUT_ALARM);
-  // Clear persistent queue state before closing our own tab. This prevents a
-  // service-worker wake-up from mistaking the intentional close for a failed task.
   await chrome.storage.local.remove(CURRENT_TASK_KEY);
   if (closeTab) await closeTaskTab(current);
+}
+
+async function reportTaskFailure(cfg, taskId, reason) {
+  if (!cfg.collectorUrl || !cfg.token || !taskId) return;
+  await collectorFetch(cfg, `/tasks/${taskId}/fail`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ error: reason || "页面没有读取到公开数据" })
+  });
 }
 
 async function failCurrentTask(reason) {
@@ -62,13 +136,7 @@ async function failCurrentTask(reason) {
   if (!current) return;
   const cfg = await settings();
   try {
-    if (cfg.collectorUrl && cfg.token) {
-      await collectorFetch(cfg, `/tasks/${current.taskId}/fail`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: reason || "页面没有读取到公开数据" })
-      });
-    }
+    await reportTaskFailure(cfg, current.taskId, reason);
   } catch {
     // Server also releases stale processing tasks, so do not trap the extension here.
   }
@@ -102,6 +170,21 @@ async function pollQueue() {
     const task = result?.task;
     if (!task) {
       await schedulePoll(60_000);
+      return;
+    }
+
+    if (await isBaselineContentUrl(task.url)) {
+      try {
+        await reportTaskFailure(cfg, task.id, "基线旧作品，按设置跳过");
+      } catch {
+        // The task will be released by the server if this request cannot complete.
+      }
+      await chrome.storage.local.set({
+        lastUploadAt: new Date().toISOString(),
+        lastUploadStatus: "success",
+        lastUploadMessage: "已跳过登记账号之前的旧作品"
+      });
+      await schedulePoll(1_500);
       return;
     }
 
@@ -151,15 +234,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     const current = await getCurrentTask();
     const queued = Boolean(current && sender.tab?.id && sender.tab.id === current.tabId);
-
-    // Queue-only mode: ordinary browsing must never create or update business data.
     if (!queued) {
       sendResponse({ ok: false, skipped: true, reason: "queue_only" });
       return;
     }
 
+    const baselinePayload = await applyMonitorBaseline(current, message.payload);
     const payload = {
-      ...message.payload,
+      ...baselinePayload,
       machine_name: cfg.machineName || "",
       collector_version: chrome.runtime.getManifest().version,
       task_id: current.taskId
@@ -174,7 +256,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await chrome.storage.local.set({
         lastUploadAt: new Date().toISOString(),
         lastUploadStatus: "success",
-        lastUploadMessage: `自动任务完成：${payload.platform}`
+        lastUploadMessage: payload.page_type === "account"
+          ? "账号数据已同步；仅新增作品会进入内容数据"
+          : `自动任务完成：${payload.platform}`
       });
 
       await clearCurrentTask(current, true);
