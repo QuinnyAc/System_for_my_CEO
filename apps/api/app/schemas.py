@@ -73,3 +73,39 @@ class ContentMetricRead(ContentMetricCreate):
     id: UUID
     content_id: UUID
     captured_at: datetime
+
+
+class ConnectionStatusRead(BaseModel):
+    account_id: UUID
+    platform_slug: str
+    configured: bool
+    connected: bool
+    status: str
+    scopes: list[str] = Field(default_factory=list)
+    expires_at: datetime | None = None
+    last_synced_at: datetime | None = None
+    last_error: str | None = None
+    callback_url: str | None = None
+
+
+class AuthorizeUrlRead(BaseModel):
+    url: str
+    callback_url: str
+
+
+class SyncLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    provider: str
+    target_type: str
+    target_id: UUID
+    status: str
+    message: str | None
+    details: dict
+    created_at: datetime
+
+
+class ImportResult(BaseModel):
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
