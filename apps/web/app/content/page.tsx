@@ -48,6 +48,10 @@ export default function ContentPage() {
   const selectedPlatform = selectedAccount ? pmap.get(selectedAccount.platform_id) : undefined;
   const isYouTube = selectedPlatform?.slug === "youtube";
 
+  useEffect(() => {
+    if (isYouTube && type !== "video" && type !== "short") setType("video");
+  }, [isYouTube, type]);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError("");
