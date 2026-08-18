@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PlatformRead(BaseModel):
@@ -32,7 +32,7 @@ class AccountMetricCreate(BaseModel):
     reach: int = 0
     engagements: int = 0
     content_count: int = 0
-    extra_metrics: dict = {}
+    extra_metrics: dict = Field(default_factory=dict)
 
 
 class AccountMetricRead(AccountMetricCreate):
@@ -65,7 +65,7 @@ class ContentMetricCreate(BaseModel):
     shares: int = 0
     impressions: int = 0
     reach: int = 0
-    extra_metrics: dict = {}
+    extra_metrics: dict = Field(default_factory=dict)
 
 
 class ContentMetricRead(ContentMetricCreate):
