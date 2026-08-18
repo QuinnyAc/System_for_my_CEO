@@ -10,9 +10,7 @@ const nav = [
   ["/collector", "公开数据采集", "Public View"],
   ["/accounts", "账号管理", "Accounts"],
   ["/content", "内容数据", "Content"],
-  ["/sync", "同步中心", "Sync"],
   ["/analytics", "数据分析", "Analytics"],
-  ["/settings", "高级 API", "Optional"],
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -31,7 +29,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside className="sidebar">
         <div className="brand"><div className="brandStone">MO</div><div><strong>Media Ops</strong><span>自媒体运营平台</span></div></div>
         <nav className="navList">{nav.map(([href, label, meta]) => <Link className={`navItem ${pathname === href ? "active" : ""}`} href={href} key={href}><span>{label}</span><small>{meta}</small></Link>)}</nav>
-        <div className="sidebarNote">YouTube · Instagram · Facebook · Pinterest<br/><button className="button secondary" style={{ marginTop: 10, width: "100%" }} onClick={logout}>退出登录</button></div>
+        <div className="sidebarNote">YouTube 长视频 · YouTube 短视频 · Instagram · Facebook · Pinterest<br/><button className="button secondary" style={{ marginTop: 10, width: "100%" }} onClick={logout}>退出登录</button></div>
       </aside>
       <main className="main">{children}</main>
     </div>
