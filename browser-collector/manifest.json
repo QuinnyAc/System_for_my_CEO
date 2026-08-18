@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Media Ops Public Metrics Collector",
+  "version": "0.1.0",
+  "description": "Reads only metrics already visible on opened social media pages and sends them to Media Ops.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*.youtube.com/*",
+    "https://youtu.be/*",
+    "https://*.instagram.com/*",
+    "https://*.facebook.com/*",
+    "https://*.pinterest.com/*",
+    "https://*.app.github.dev/*",
+    "http://localhost:8200/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.youtube.com/*",
+        "https://youtu.be/*",
+        "https://*.instagram.com/*",
+        "https://*.facebook.com/*",
+        "https://*.pinterest.com/*"
+      ],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Media Ops Public Metrics Collector"
+  }
+}
