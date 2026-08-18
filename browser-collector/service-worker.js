@@ -6,7 +6,7 @@ const DEFAULTS = {
 };
 
 async function settings() {
-  return chrome.storage.sync.get(DEFAULTS);
+  return chrome.storage.local.get(DEFAULTS);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
