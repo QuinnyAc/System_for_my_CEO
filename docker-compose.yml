@@ -27,6 +27,7 @@ services:
       APP_PASSWORD: ${APP_PASSWORD:-change-me-now}
       SESSION_SECRET: ${SESSION_SECRET:-development-only-media-ops-session-secret}
       CREDENTIALS_SECRET: ${CREDENTIALS_SECRET:-development-only-media-ops-credentials-secret}
+      COLLECTOR_TOKEN: ${COLLECTOR_TOKEN:-change-me-collector-token}
       AUTO_SYNC_ENABLED: ${AUTO_SYNC_ENABLED:-false}
       AUTO_SYNC_INTERVAL_MINUTES: ${AUTO_SYNC_INTERVAL_MINUTES:-60}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
@@ -45,6 +46,20 @@ services:
     volumes:
       - ./apps/api:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8100 --reload
+
+  collector:
+    build:
+      context: ./apps/api
+    environment: *api_environment
+    ports:
+      - "${COLLECTOR_PORT:-8200}:8200"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./apps/api:/app
+    command: uvicorn app.collector_app:app --host 0.0.0.0 --port 8200 --reload
+    restart: unless-stopped
 
   sync-worker:
     build:
