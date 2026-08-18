@@ -27,7 +27,7 @@ set_env_value() {
   mv "$tmp" .env
 }
 
-USERNAME_VALUE="Quinny/WR"
+USERNAME_VALUE="WR"
 read -r -s -p "New Media Ops password: " PASSWORD_VALUE
 printf '\n'
 if [[ -z "$PASSWORD_VALUE" ]]; then
