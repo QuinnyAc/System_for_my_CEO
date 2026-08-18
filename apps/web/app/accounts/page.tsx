@@ -36,11 +36,15 @@ async function collectorAdmin<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function detectPlatformSlug(value: string): string | null {
+function parseInputUrl(value: string) {
   const raw = value.trim();
-  if (!raw) return null;
+  return new URL(raw.includes("://") ? raw : `https://${raw}`);
+}
+
+function detectPlatformSlug(value: string): string | null {
+  if (!value.trim()) return null;
   try {
-    const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+    const url = parseInputUrl(value);
     const host = url.hostname.replace(/^www\./, "").toLowerCase();
     if (host === "youtu.be" || host.endsWith("youtube.com")) return "youtube";
     if (host.endsWith("instagram.com")) return "instagram";
@@ -48,6 +52,24 @@ function detectPlatformSlug(value: string): string | null {
     if (host === "pin.it" || host.endsWith("pinterest.com")) return "pinterest";
   } catch {}
   return null;
+}
+
+function isContentReference(value: string) {
+  try {
+    const url = parseInputUrl(value);
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (host === "youtu.be") return true;
+    if (host.endsWith("youtube.com")) return url.pathname === "/watch" || ["shorts", "live"].includes(segments[0] || "");
+    if (host.endsWith("instagram.com")) return ["p", "reel", "tv"].includes(segments[0] || "");
+    if (host === "fb.watch") return true;
+    if (host.endsWith("facebook.com")) {
+      return /\/(posts|videos|reel|watch|photo|permalink)\b/i.test(url.pathname) || url.searchParams.has("story_fbid") || url.searchParams.has("fbid") || (url.pathname === "/watch" && url.searchParams.has("v"));
+    }
+    if (host === "pin.it") return true;
+    if (host.endsWith("pinterest.com")) return segments[0] === "pin";
+  } catch {}
+  return false;
 }
 
 function metricKnown(metric: AccountMetric, key: "followers" | "content_count") {
@@ -114,6 +136,10 @@ export default function AccountsPage() {
     const detectedSlug = detectPlatformSlug(profileUrl);
     if (!detectedSlug) {
       setError("请填写 YouTube、Instagram、Facebook 或 Pinterest 的公开账号主页地址。");
+      return;
+    }
+    if (isContentReference(profileUrl)) {
+      setError("这里需要填写账号主页地址，不要填写单个视频、Reel、帖子或 Pin 的链接。");
       return;
     }
     const detectedPlatform = platforms.find((p) => p.slug === detectedSlug);
