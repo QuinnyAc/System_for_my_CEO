@@ -4,15 +4,16 @@ from datetime import datetime, timedelta, timezone
 import hmac
 import os
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import Base, SessionLocal, engine, get_db
-from app.models import AccountMetricSnapshot, ContentMetricSnapshot, Platform, PublishedContent, SocialAccount
+from app.models import AccountMetricSnapshot, CollectorTask, ContentMetricSnapshot, Platform, PublishedContent, SocialAccount
 
 
 PLATFORMS = {
@@ -24,7 +25,7 @@ PLATFORMS = {
 
 COLLECTOR_TOKEN = os.getenv("COLLECTOR_TOKEN", "")
 
-app = FastAPI(title="Media Ops Browser Collector", version="0.1.0")
+app = FastAPI(title="Media Ops Browser Collector", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -59,6 +60,7 @@ class CollectorPayload(BaseModel):
     metrics: PublicMetrics = Field(default_factory=PublicMetrics)
     machine_name: str = ""
     collector_version: str = ""
+    task_id: UUID | None = None
 
 
 class CollectorResult(BaseModel):
@@ -67,6 +69,22 @@ class CollectorResult(BaseModel):
     content_id: str | None = None
     account_snapshot_created: bool = False
     content_snapshot_created: bool = False
+    task_completed: bool = False
+
+
+class QueueTaskRead(BaseModel):
+    id: UUID
+    url: str
+    platform: str
+    attempts: int
+
+
+class QueueLease(BaseModel):
+    task: QueueTaskRead | None = None
+
+
+class QueueFailure(BaseModel):
+    error: str = ""
 
 
 def require_collector_token(x_collector_token: str = Header(default="")) -> None:
@@ -115,6 +133,66 @@ def startup() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "collector": "browser_public_view"}
+
+
+@app.get("/tasks/next", response_model=QueueLease, dependencies=[Depends(require_collector_token)])
+def next_task(machine_name: str = Query(default="", max_length=120), db: Session = Depends(get_db)) -> QueueLease:
+    now = datetime.now(timezone.utc)
+    stale_before = now - timedelta(minutes=3)
+
+    stale = list(
+        db.scalars(
+            select(CollectorTask).where(
+                CollectorTask.status == "processing",
+                CollectorTask.started_at.is_not(None),
+                CollectorTask.started_at < stale_before,
+            )
+        )
+    )
+    for item in stale:
+        item.status = "pending" if item.attempts < 3 else "error"
+        item.last_error = "采集助手超时，任务已自动释放。"
+        item.started_at = None
+    if stale:
+        db.commit()
+
+    machine = machine_name.strip()
+    assignment = or_(CollectorTask.machine_name.is_(None), CollectorTask.machine_name == "")
+    if machine:
+        assignment = or_(assignment, CollectorTask.machine_name == machine)
+
+    task = db.scalar(
+        select(CollectorTask)
+        .where(CollectorTask.status == "pending", assignment)
+        .order_by(CollectorTask.created_at.asc())
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    )
+    if task is None:
+        return QueueLease(task=None)
+
+    task.status = "processing"
+    task.started_at = now
+    task.attempts += 1
+    task.last_error = None
+    if machine and not task.machine_name:
+        task.machine_name = machine
+    db.commit()
+    return QueueLease(task=QueueTaskRead(id=task.id, url=task.url, platform=task.platform, attempts=task.attempts))
+
+
+@app.post("/tasks/{task_id}/fail", dependencies=[Depends(require_collector_token)])
+def fail_task(task_id: UUID, payload: QueueFailure, db: Session = Depends(get_db)):
+    task = db.get(CollectorTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status == "completed":
+        return {"ok": True, "status": task.status}
+    task.last_error = (payload.error or "页面没有读取到公开数据")[:1000]
+    task.started_at = None
+    task.status = "error" if task.attempts >= 3 else "pending"
+    db.commit()
+    return {"ok": True, "status": task.status, "attempts": task.attempts}
 
 
 def find_or_create_account(db: Session, payload: CollectorPayload, platform: Platform) -> SocialAccount:
@@ -199,6 +277,7 @@ def source_meta(payload: CollectorPayload) -> dict:
         "machine_name": payload.machine_name,
         "collector_version": payload.collector_version,
         "public_view_only": True,
+        "collector_task_id": str(payload.task_id) if payload.task_id else "",
     }
 
 
@@ -329,10 +408,23 @@ def ingest(payload: CollectorPayload, db: Session = Depends(get_db)) -> Collecto
         content_snapshot_created = maybe_add_content_snapshot(db, item, payload)
         content_id = str(item.id)
 
+    task_completed = False
+    if payload.task_id:
+        task = db.get(CollectorTask, payload.task_id)
+        if task and task.status == "processing":
+            task.status = "completed"
+            task.completed_at = datetime.now(timezone.utc)
+            task.started_at = None
+            task.last_error = None
+            if payload.machine_name.strip():
+                task.machine_name = payload.machine_name.strip()[:120]
+            task_completed = True
+
     db.commit()
     return CollectorResult(
         account_id=str(account.id),
         content_id=content_id,
         account_snapshot_created=account_snapshot_created,
         content_snapshot_created=content_snapshot_created,
+        task_completed=task_completed,
     )
