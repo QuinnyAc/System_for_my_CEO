@@ -120,6 +120,14 @@ def _get(path: str, *, params: dict, api_key: str = "", access_token: str = "") 
         raise YouTubeApiError(f"YouTube API 请求失败。{detail}") from exc
 
 
+def _with_oauth_context(channel: dict, access_token: str) -> dict:
+    # The token is attached only to this in-memory response object so channel_metrics
+    # can make the Analytics request. This object is never persisted or returned by our API.
+    if access_token:
+        channel["_oauth_access_token"] = access_token
+    return channel
+
+
 def fetch_authenticated_channel(access_token: str) -> dict:
     payload = _get(
         "channels",
@@ -129,7 +137,7 @@ def fetch_authenticated_channel(access_token: str) -> dict:
     items = payload.get("items") or []
     if not items:
         raise YouTubeApiError("该 Google 授权账号下没有找到 YouTube 频道。")
-    return items[0]
+    return _with_oauth_context(items[0], access_token)
 
 
 def fetch_channel(channel_id: str, *, api_key: str = "", access_token: str = "") -> dict:
@@ -142,20 +150,38 @@ def fetch_channel(channel_id: str, *, api_key: str = "", access_token: str = "")
     items = payload.get("items") or []
     if not items:
         raise YouTubeApiError("没有找到该 YouTube Channel ID。")
-    return items[0]
+    return _with_oauth_context(items[0], access_token)
 
 
 def channel_metrics(channel: dict) -> AccountMetrics:
     stats = channel.get("statistics") or {}
+    extra_metrics: dict[str, object] = {
+        "source": "youtube_data_api",
+        "hidden_subscriber_count": bool(stats.get("hiddenSubscriberCount", False)),
+        "subscriber_count_is_rounded": True,
+    }
+
+    access_token = str(channel.get("_oauth_access_token") or "")
+    if access_token:
+        try:
+            analytics = fetch_channel_analytics(access_token, days=28)
+            extra_metrics["analytics_28d"] = analytics
+            extra_metrics["engagements_28d"] = (
+                int(analytics.get("likes") or 0)
+                + int(analytics.get("comments") or 0)
+                + int(analytics.get("shares") or 0)
+            )
+        except YouTubeApiError as exc:
+            # Keep the Data API snapshot usable even when Analytics has not yet
+            # been enabled or consent has not yet been refreshed for the new scope.
+            extra_metrics["analytics_28d_available"] = False
+            extra_metrics["analytics_error"] = str(exc)
+
     return AccountMetrics(
         followers=int(stats.get("subscriberCount") or 0),
         views=int(stats.get("viewCount") or 0),
         content_count=int(stats.get("videoCount") or 0),
-        extra_metrics={
-            "source": "youtube_data_api",
-            "hidden_subscriber_count": bool(stats.get("hiddenSubscriberCount", False)),
-            "subscriber_count_is_rounded": True,
-        },
+        extra_metrics=extra_metrics,
     )
 
 
