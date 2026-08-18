@@ -5,6 +5,7 @@ import pytest
 
 from app.credential_crypto import decrypt_secret, encrypt_secret
 from app.oauth_state import OAuthStateError, create_oauth_state, decode_oauth_state
+from app.providers.meta import build_authorize_url as meta_authorize_url
 from app.providers.pinterest import build_authorize_url as pinterest_authorize_url
 from app.providers.youtube import build_authorize_url as youtube_authorize_url
 from app.providers.youtube import video_id_from_reference
@@ -47,6 +48,21 @@ def test_youtube_oauth_requests_data_and_analytics_readonly() -> None:
     assert "https://www.googleapis.com/auth/youtube.readonly" in scopes
     assert "https://www.googleapis.com/auth/yt-analytics.readonly" in scopes
     assert query["access_type"] == ["offline"]
+    assert query["state"] == ["state-token"]
+
+
+def test_meta_oauth_requests_read_permissions_used_by_sync() -> None:
+    url = meta_authorize_url("app-id", "v23.0", "https://example.com/callback", "state-token")
+    query = parse_qs(urlparse(url).query)
+    scopes = set(query["scope"][0].replace(",", " ").split())
+    assert {
+        "pages_show_list",
+        "pages_read_engagement",
+        "pages_read_user_content",
+        "read_insights",
+        "instagram_basic",
+        "instagram_manage_insights",
+    }.issubset(scopes)
     assert query["state"] == ["state-token"]
 
 
