@@ -6,12 +6,13 @@ import os
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.auth import COOKIE_NAME, session_valid
 from app.db import Base, SessionLocal, engine, get_db
 from app.models import AccountMetricSnapshot, CollectorTask, ContentMetricSnapshot, Platform, PublishedContent, SocialAccount
 
@@ -25,12 +26,12 @@ PLATFORMS = {
 
 COLLECTOR_TOKEN = os.getenv("COLLECTOR_TOKEN", "")
 
-app = FastAPI(title="Media Ops Browser Collector", version="0.2.0")
+app = FastAPI(title="Media Ops Browser Collector", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -87,9 +88,39 @@ class QueueFailure(BaseModel):
     error: str = ""
 
 
+class AdminTaskBatchCreate(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=500)
+    machine_name: str | None = Field(default=None, max_length=120)
+
+
+class AdminTaskRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    url: str
+    platform: str
+    machine_name: str | None
+    status: str
+    attempts: int
+    last_error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class AdminTaskBatchResult(BaseModel):
+    created: int = 0
+    skipped: int = 0
+    tasks: list[AdminTaskRead] = Field(default_factory=list)
+
+
 def require_collector_token(x_collector_token: str = Header(default="")) -> None:
     if not COLLECTOR_TOKEN or not hmac.compare_digest(x_collector_token, COLLECTOR_TOKEN):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid collector token")
+
+
+def require_admin_session(request: Request) -> None:
+    if not session_valid(request.cookies.get(COOKIE_NAME)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
 
 def normalize_handle(value: str) -> str:
@@ -115,6 +146,28 @@ def normalize_url(value: str) -> str:
     return urlunparse((scheme, host, path, "", query, ""))
 
 
+def platform_for_url(value: str) -> str | None:
+    raw = value.strip()
+    if not raw:
+        return None
+    candidate = raw if "://" in raw else f"https://{raw}"
+    try:
+        host = urlparse(candidate).netloc.lower().split(":")[0]
+    except ValueError:
+        return None
+    if host.startswith("www."):
+        host = host[4:]
+    if host == "youtu.be" or host.endswith("youtube.com"):
+        return "youtube"
+    if host.endswith("instagram.com"):
+        return "instagram"
+    if host == "fb.watch" or host.endswith("facebook.com"):
+        return "facebook"
+    if host == "pin.it" or host.endswith("pinterest.com"):
+        return "pinterest"
+    return None
+
+
 def seed_platforms() -> None:
     with SessionLocal() as db:
         existing = {item.slug for item in db.scalars(select(Platform)).all()}
@@ -133,6 +186,82 @@ def startup() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "collector": "browser_public_view"}
+
+
+@app.get("/admin/tasks", response_model=list[AdminTaskRead], dependencies=[Depends(require_admin_session)])
+def admin_list_tasks(db: Session = Depends(get_db)):
+    return list(db.scalars(select(CollectorTask).order_by(CollectorTask.created_at.desc()).limit(300)))
+
+
+@app.post("/admin/tasks/batch", response_model=AdminTaskBatchResult, dependencies=[Depends(require_admin_session)])
+def admin_create_tasks(payload: AdminTaskBatchCreate, db: Session = Depends(get_db)) -> AdminTaskBatchResult:
+    machine = (payload.machine_name or "").strip()[:120] or None
+    created: list[CollectorTask] = []
+    skipped = 0
+    seen: set[str] = set()
+
+    for raw_value in payload.urls:
+        raw = raw_value.strip()
+        if not raw:
+            skipped += 1
+            continue
+        candidate = raw if "://" in raw else f"https://{raw}"
+        platform = platform_for_url(candidate)
+        if platform is None:
+            skipped += 1
+            continue
+        normalized = normalize_url(candidate)
+        dedupe_key = f"{machine or ''}|{normalized}"
+        if dedupe_key in seen:
+            skipped += 1
+            continue
+        seen.add(dedupe_key)
+        exists = db.scalar(
+            select(CollectorTask.id).where(
+                CollectorTask.url == normalized,
+                CollectorTask.status.in_(["pending", "processing"]),
+                or_(
+                    CollectorTask.machine_name == machine,
+                    (CollectorTask.machine_name.is_(None) if machine is None else CollectorTask.machine_name == machine),
+                ),
+            ).limit(1)
+        )
+        if exists:
+            skipped += 1
+            continue
+        task = CollectorTask(url=normalized, platform=platform, machine_name=machine, status="pending")
+        db.add(task)
+        created.append(task)
+
+    db.commit()
+    for task in created:
+        db.refresh(task)
+    return AdminTaskBatchResult(created=len(created), skipped=skipped, tasks=created)
+
+
+@app.delete("/admin/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin_session)])
+def admin_delete_task(task_id: UUID, db: Session = Depends(get_db)):
+    task = db.get(CollectorTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    db.delete(task)
+    db.commit()
+    return None
+
+
+@app.post("/admin/tasks/{task_id}/retry", response_model=AdminTaskRead, dependencies=[Depends(require_admin_session)])
+def admin_retry_task(task_id: UUID, db: Session = Depends(get_db)):
+    task = db.get(CollectorTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task.status = "pending"
+    task.attempts = 0
+    task.started_at = None
+    task.completed_at = None
+    task.last_error = None
+    db.commit()
+    db.refresh(task)
+    return task
 
 
 @app.get("/tasks/next", response_model=QueueLease, dependencies=[Depends(require_collector_token)])
