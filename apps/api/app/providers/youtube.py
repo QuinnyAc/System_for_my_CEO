@@ -1,14 +1,18 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
 
-YOUTUBE_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+YOUTUBE_SCOPES = [
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
+]
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 API_BASE = "https://www.googleapis.com/youtube/v3"
+ANALYTICS_URL = "https://youtubeanalytics.googleapis.com/v2/reports"
 
 
 class YouTubeApiError(RuntimeError):
@@ -42,7 +46,7 @@ class ContentMetrics:
 
 
 def build_authorize_url(client_id: str, redirect_uri: str, state: str) -> str:
-    return f"{AUTH_URL}?{urlencode({'client_id': client_id, 'redirect_uri': redirect_uri, 'response_type': 'code', 'scope': YOUTUBE_SCOPE, 'access_type': 'offline', 'prompt': 'consent', 'include_granted_scopes': 'true', 'state': state})}"
+    return f"{AUTH_URL}?{urlencode({'client_id': client_id, 'redirect_uri': redirect_uri, 'response_type': 'code', 'scope': ' '.join(YOUTUBE_SCOPES), 'access_type': 'offline', 'prompt': 'consent', 'include_granted_scopes': 'true', 'state': state})}"
 
 
 def _tokens(payload: dict) -> OAuthTokens:
@@ -51,7 +55,7 @@ def _tokens(payload: dict) -> OAuthTokens:
         raise YouTubeApiError("Google 没有返回 access_token。")
     expires_in = int(payload.get("expires_in") or 0)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
-    scope = str(payload.get("scope") or YOUTUBE_SCOPE)
+    scope = str(payload.get("scope") or " ".join(YOUTUBE_SCOPES))
     return OAuthTokens(
         access_token=access_token,
         refresh_token=str(payload.get("refresh_token") or ""),
@@ -153,6 +157,64 @@ def channel_metrics(channel: dict) -> AccountMetrics:
             "subscriber_count_is_rounded": True,
         },
     )
+
+
+def fetch_channel_analytics(access_token: str, *, days: int = 28) -> dict:
+    period_days = min(max(days, 1), 90)
+    end_date = date.today() - timedelta(days=1)
+    start_date = end_date - timedelta(days=period_days - 1)
+    metrics = [
+        "views",
+        "estimatedMinutesWatched",
+        "averageViewDuration",
+        "likes",
+        "comments",
+        "shares",
+        "subscribersGained",
+        "subscribersLost",
+    ]
+    try:
+        response = httpx.get(
+            ANALYTICS_URL,
+            params={
+                "ids": "channel==MINE",
+                "startDate": start_date.isoformat(),
+                "endDate": end_date.isoformat(),
+                "metrics": ",".join(metrics),
+            },
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        detail = ""
+        if isinstance(exc, httpx.HTTPStatusError):
+            detail = exc.response.text[:300]
+        raise YouTubeApiError(f"YouTube Analytics API 请求失败。{detail}") from exc
+
+    headers = [str(item.get("name") or "") for item in payload.get("columnHeaders") or []]
+    rows = payload.get("rows") or []
+    values = rows[0] if rows else []
+    result: dict[str, int | float | str] = {
+        "period_start": start_date.isoformat(),
+        "period_end": end_date.isoformat(),
+    }
+    for index, name in enumerate(headers):
+        if not name or index >= len(values):
+            continue
+        value = values[index]
+        if name == "averageViewDuration":
+            try:
+                result[name] = float(value or 0)
+            except (TypeError, ValueError):
+                result[name] = 0.0
+        else:
+            try:
+                result[name] = int(float(value or 0))
+            except (TypeError, ValueError):
+                result[name] = 0
+    return result
 
 
 def video_id_from_reference(value: str) -> str | None:
