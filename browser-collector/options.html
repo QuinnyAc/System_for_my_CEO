@@ -18,9 +18,9 @@
 <body>
   <div class="card">
     <h1>公开数据采集助手</h1>
-    <div class="muted">只读取浏览器页面上已经公开显示的播放、点赞、评论、粉丝等数字。不会自动登录、点赞、评论、关注或绕过平台权限。</div>
+    <div class="muted">统一采用链接队列模式。只有你在中央网站主动粘贴并加入队列的作品链接才会被读取和写入系统；平时手动浏览 YouTube、Instagram、Facebook、Pinterest 页面不会自动记录。</div>
 
-    <label><input id="enabled" type="checkbox" /> 启用自动采集</label>
+    <label><input id="enabled" type="checkbox" /> 启用自动采集队列</label>
 
     <label for="collectorUrl">Collector 地址</label>
     <input id="collectorUrl" class="input" placeholder="https://...-3100.app.github.dev/collector" />
@@ -31,7 +31,7 @@
     <label for="machineName">电脑名称</label>
     <input id="machineName" class="input" placeholder="例如 1" />
 
-    <div class="note">自动队列模式：在中央网站“公开数据采集”页面粘贴链接后，这台电脑会在后台依次打开链接，读取公开数字后自动关闭，再继续下一条。每条最多等待 60 秒，失败最多重试 3 次。</div>
+    <div class="note">使用方式：在中央网站“公开数据采集”页面复制粘贴视频或作品链接 → 加入队列 → 这台电脑在后台依次打开链接 → 读取公开播放、点赞、评论等数据 → 自动关闭 → 继续下一条。不会自动登录、点赞、评论、关注，也不会绕过验证码或平台权限。</div>
 
     <div class="row">
       <button id="save" class="button">保存设置</button>
