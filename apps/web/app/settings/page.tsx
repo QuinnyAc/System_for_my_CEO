@@ -46,7 +46,7 @@ export default function SettingsPage() {
         "Instagram 必须为 Professional（Business / Creator）账号",
         "账号需连接到可管理的 Facebook Page",
         "当前集成请求 instagram_basic / instagram_manage_insights",
-        "同时请求 pages_show_list / pages_read_engagement / read_insights",
+        "同时请求 pages_show_list / pages_read_engagement / pages_read_user_content / read_insights",
       ],
     },
     {
@@ -57,7 +57,7 @@ export default function SettingsPage() {
       detail: "通过 Meta 官方授权连接可管理的 Facebook Page 及内容数据。",
       requirements: [
         "Meta Developer App",
-        "当前集成请求 pages_show_list / pages_read_engagement / read_insights",
+        "当前集成请求 pages_show_list / pages_read_engagement / pages_read_user_content / read_insights",
         "授权用户需要对目标 Facebook Page 有管理权限",
         "Instagram 与 Facebook 共用同一 Meta App，可分别建立账号记录",
       ],
