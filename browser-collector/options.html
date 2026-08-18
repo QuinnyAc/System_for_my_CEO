@@ -11,24 +11,27 @@
     label{display:block;font-weight:600;margin-top:18px;margin-bottom:6px}.input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;font-size:14px}
     .row{display:flex;gap:12px;align-items:center;margin-top:18px}.button{border:0;border-radius:10px;padding:10px 16px;background:#111827;color:white;font-weight:600;cursor:pointer}.secondary{background:#e5e7eb;color:#111827}
     .status{margin-top:16px;padding:10px 12px;border-radius:10px;background:#f1f5f9;font-size:13px;white-space:pre-wrap}.ok{background:#ecfdf5;color:#065f46}.error{background:#fef2f2;color:#991b1b}
+    .note{margin-top:18px;padding:12px 14px;border-radius:10px;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.7}
     code{background:#f1f5f9;padding:2px 5px;border-radius:5px}
   </style>
 </head>
 <body>
   <div class="card">
     <h1>公开数据采集助手</h1>
-    <div class="muted">只读取你当前浏览器页面上已经公开显示的播放、点赞、评论、粉丝等数字。不会自动登录、点赞、评论、关注或绕过平台权限。</div>
+    <div class="muted">只读取浏览器页面上已经公开显示的播放、点赞、评论、粉丝等数字。不会自动登录、点赞、评论、关注或绕过平台权限。</div>
 
     <label><input id="enabled" type="checkbox" /> 启用自动采集</label>
 
     <label for="collectorUrl">Collector 地址</label>
-    <input id="collectorUrl" class="input" placeholder="https://...-8200.app.github.dev" />
+    <input id="collectorUrl" class="input" placeholder="https://...-3100.app.github.dev/collector" />
 
     <label for="token">Collector Token</label>
     <input id="token" class="input" type="password" autocomplete="off" placeholder="从中央 Codespace 的 COLLECTOR_TOKEN 获取" />
 
     <label for="machineName">电脑名称</label>
-    <input id="machineName" class="input" placeholder="例如 Computer-01" />
+    <input id="machineName" class="input" placeholder="例如 1" />
+
+    <div class="note">自动队列模式：在中央网站“公开数据采集”页面粘贴链接后，这台电脑会在后台依次打开链接，读取公开数字后自动关闭，再继续下一条。每条最多等待 60 秒，失败最多重试 3 次。</div>
 
     <div class="row">
       <button id="save" class="button">保存设置</button>
