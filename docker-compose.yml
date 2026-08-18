@@ -78,10 +78,12 @@ services:
       context: ./apps/web
     environment:
       API_INTERNAL_URL: http://api:8100
+      COLLECTOR_INTERNAL_URL: http://collector:8200
     ports:
       - "${WEB_PORT:-3100}:3100"
     depends_on:
       - api
+      - collector
     volumes:
       - ./apps/web:/app
       - media_ops_hub_web_node_modules:/app/node_modules
