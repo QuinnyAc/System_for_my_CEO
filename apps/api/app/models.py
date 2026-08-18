@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,6 +30,32 @@ class SocialAccount(Base):
     platform: Mapped[Platform] = relationship()
     metrics: Mapped[list["AccountMetricSnapshot"]] = relationship(cascade="all, delete-orphan")
     content: Mapped[list["PublishedContent"]] = relationship(cascade="all, delete-orphan")
+    connection: Mapped["PlatformConnection | None"] = relationship(
+        cascade="all, delete-orphan",
+        uselist=False,
+        back_populates="account",
+    )
+
+
+class PlatformConnection(Base):
+    __tablename__ = "platform_connections"
+    __table_args__ = (UniqueConstraint("account_id", name="uq_platform_connections_account_id"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    account_id: Mapped[UUID] = mapped_column(ForeignKey("social_accounts.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    access_token_encrypted: Mapped[str] = mapped_column(Text)
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scopes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    provider_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(32), default="connected")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    account: Mapped[SocialAccount] = relationship(back_populates="connection")
 
 
 class AccountMetricSnapshot(Base):
@@ -76,3 +102,16 @@ class ContentMetricSnapshot(Base):
     impressions: Mapped[int] = mapped_column(Integer, default=0)
     reach: Mapped[int] = mapped_column(Integer, default=0)
     extra_metrics: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class SyncLog(Base):
+    __tablename__ = "sync_logs"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    target_type: Mapped[str] = mapped_column(String(32), index=True)
+    target_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), index=True)
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
