@@ -45,12 +45,15 @@ else
   WEB_URL="http://localhost:3100"
 fi
 
+APP_USERNAME_VALUE="$(sed -n 's/^APP_USERNAME=//p' .env | head -n1)"
+APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-admin}"
+
 cat <<EOF
 
 Media Ops is ready.
 Web: ${WEB_URL}
 API: proxied through ${WEB_URL}/api/v1
-Login username: admin
+Login username: ${APP_USERNAME_VALUE}
 Login password: read APP_PASSWORD from this repository's local .env file
 
 EOF
