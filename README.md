@@ -1,6 +1,6 @@
-# ZenoMinerals Social Operations Platform
+# Social Media Operations Platform
 
-Standalone social media operations platform for ZenoMinerals.
+A standalone company social media operations platform designed to remain neutral to company name, brand, product line, or content category.
 
 ## Platform scope
 
@@ -9,16 +9,15 @@ Standalone social media operations platform for ZenoMinerals.
 - Facebook
 - Pinterest
 
-## Hard isolation boundary
+## System boundary
 
-This repository is a standalone system.
+This repository runs as its own standalone system.
 
-- It does not import, reference, mount, query, or depend on any other Creator Ops repository.
-- It uses its own PostgreSQL database: `zeno_social_ops`.
-- It uses its own Docker volumes prefixed with `zeno_social_ops_`.
-- It uses its own web/API ports and its own authentication + credential-encryption secrets.
-- Google, Meta, and Pinterest OAuth/API credentials belong only to this repository and must never be committed to Git.
-- No cross-project database, login, cookie, secret, OAuth token, Codespace, deployment, runtime, or data sharing is allowed.
+- PostgreSQL database: `media_ops_hub`.
+- Docker volumes use the `media_ops_hub_` prefix.
+- Web, API, authentication, credential-encryption, OAuth tokens, runtime configuration, Codespace, and deployment are self-contained.
+- Google, Meta, and Pinterest OAuth/API credentials must never be committed to Git.
+- The application must not depend on or share data with any external project.
 
 ## Product modules
 
@@ -37,12 +36,12 @@ This repository is a standalone system.
 
 Each social account owns an independent API connection record. OAuth tokens are encrypted before they are stored in PostgreSQL.
 
-- YouTube: public Data API Key fallback plus Google OAuth for the actual channel; channel metrics, single-video metrics, and recent upload import.
+- YouTube: Data API Key fallback plus Google OAuth; channel metrics, single-video metrics, and recent upload import.
 - Instagram: Meta official authorization for Professional accounts, account/media data, and recent media import.
 - Facebook: Meta official authorization for managed Pages, Page/post data, and recent published post import.
 - Pinterest: Pinterest OAuth, account/Pin data, and recent Pin import.
 
-The application also keeps manual metric snapshot endpoints so historical data can still be recorded before all provider credentials are configured.
+Manual metric snapshots remain available so historical data can still be recorded before all provider credentials are configured.
 
 ## Local ports
 
@@ -52,7 +51,7 @@ The application also keeps manual metric snapshot endpoints so historical data c
 
 ## Runtime secrets
 
-The `.env.example` file contains names/placeholders only. Real values must exist only in the runtime environment for this repository.
+The `.env.example` file contains names/placeholders only. Real values must exist only in this repository's runtime environment.
 
 Required application secrets:
 
