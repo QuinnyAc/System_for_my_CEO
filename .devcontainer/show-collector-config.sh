@@ -14,9 +14,9 @@ fi
 
 if [[ -n "${CODESPACE_NAME:-}" ]]; then
   DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
-  URL="https://${CODESPACE_NAME}-8200.${DOMAIN}"
+  URL="https://${CODESPACE_NAME}-3100.${DOMAIN}/collector"
 else
-  URL="http://localhost:8200"
+  URL="http://localhost:3100/collector"
 fi
 
 cat <<EOF
