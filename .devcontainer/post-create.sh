@@ -65,14 +65,15 @@ fi
 replace_placeholder "SESSION_SECRET" "GENERATE_ON_SETUP" "$SESSION_SECRET" || true
 replace_placeholder "CREDENTIALS_SECRET" "GENERATE_ON_SETUP" "$CREDENTIALS_SECRET" || true
 
-if [[ "${CODESPACES:-false}" == "true" ]]; then
-  WEB_URL="https://${CODESPACE_NAME}-3100.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+if [[ -n "${CODESPACE_NAME:-}" ]]; then
+  PORT_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
+  WEB_URL="https://${CODESPACE_NAME}-3100.${PORT_DOMAIN}"
   set_env_value "PUBLIC_WEB_URL" "$WEB_URL"
   set_env_value "CORS_ORIGINS" "$WEB_URL"
 fi
 
 APP_USERNAME_VALUE="$(sed -n 's/^APP_USERNAME=//p' .env | head -n1)"
-APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-admin}"
+APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-Quinny/WR}"
 
 if [[ "$GENERATED_LOGIN" == "true" ]]; then
   echo "Media Ops initial login created."
