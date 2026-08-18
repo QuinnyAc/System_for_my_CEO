@@ -115,3 +115,18 @@ class SyncLog(Base):
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     details: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class CollectorTask(Base):
+    __tablename__ = "collector_tasks"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    platform: Mapped[str] = mapped_column(String(32), index=True)
+    machine_name: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
