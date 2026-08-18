@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-zeno_social_ops}
+      POSTGRES_USER: ${POSTGRES_USER:-zeno_social_ops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local}
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - zeno_social_ops_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-zeno_social_ops} -d ${POSTGRES_DB:-zeno_social_ops}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-zeno_social_ops}:${POSTGRES_PASSWORD:-change-me-local}@db:5432/${POSTGRES_DB:-zeno_social_ops}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3100}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3100}
+      APP_USERNAME: ${APP_USERNAME:-admin}
+      APP_PASSWORD: ${APP_PASSWORD:-change-me-now}
+      SESSION_SECRET: ${SESSION_SECRET:-development-only-zeno-session-secret}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      META_APP_ID: ${META_APP_ID:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      PINTEREST_APP_ID: ${PINTEREST_APP_ID:-}
+      PINTEREST_APP_SECRET: ${PINTEREST_APP_SECRET:-}
+    ports:
+      - "${API_PORT:-8100}:8100"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./apps/api:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8100 --reload
+
+  web:
+    build:
+      context: ./apps/web
+    environment:
+      API_INTERNAL_URL: http://api:8100
+    ports:
+      - "${WEB_PORT:-3100}:3100"
+    depends_on:
+      - api
+    volumes:
+      - ./apps/web:/app
+      - zeno_social_ops_web_node_modules:/app/node_modules
+    command: npm run dev -- --port 3100
+
+volumes:
+  zeno_social_ops_postgres:
+  zeno_social_ops_web_node_modules:
