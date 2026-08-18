@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${CODESPACES:-false}" == "true" ]]; then
+if [[ -n "${CODESPACE_NAME:-}" ]]; then
   bash .devcontainer/post-create.sh >/dev/null
 fi
 
@@ -38,15 +38,18 @@ wait_for_url() {
 wait_for_url "http://localhost:3100/" "Web"
 wait_for_url "http://localhost:8100/health" "API"
 
-if [[ "${CODESPACES:-false}" == "true" ]] && command -v gh >/dev/null 2>&1; then
-  gh codespace ports visibility 3100:public -c "${CODESPACE_NAME}" >/dev/null 2>&1 || true
-  WEB_URL="https://${CODESPACE_NAME}-3100.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+if [[ -n "${CODESPACE_NAME:-}" ]]; then
+  PORT_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
+  if command -v gh >/dev/null 2>&1; then
+    gh codespace ports visibility 3100:public -c "${CODESPACE_NAME}" >/dev/null 2>&1 || true
+  fi
+  WEB_URL="https://${CODESPACE_NAME}-3100.${PORT_DOMAIN}"
 else
   WEB_URL="http://localhost:3100"
 fi
 
 APP_USERNAME_VALUE="$(sed -n 's/^APP_USERNAME=//p' .env | head -n1)"
-APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-admin}"
+APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-Quinny/WR}"
 
 cat <<EOF
 
