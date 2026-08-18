@@ -41,6 +41,26 @@ function baselineKey(feedUrl) {
   return `${BASELINE_PREFIX}${canonicalUrl(feedUrl)}`;
 }
 
+function looksLikeContentUrl(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+    const path = url.pathname;
+    if (host.endsWith("youtube.com") || host === "youtu.be") return path === "/watch" || path.startsWith("/shorts/") || host === "youtu.be";
+    if (host.endsWith("instagram.com")) return path.startsWith("/p/") || path.startsWith("/reel/");
+    if (host.endsWith("facebook.com") || host === "fb.watch") return /\/(posts|videos|reel|watch|photo|permalink)\b/i.test(path) || url.searchParams.has("story_fbid") || host === "fb.watch";
+    if (host.endsWith("pinterest.com") || host === "pin.it") return path.startsWith("/pin/") || host === "pin.it";
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function hasAnyMonitorBaseline() {
+  const stored = await chrome.storage.local.get(null);
+  return Object.keys(stored).some((key) => key.startsWith(BASELINE_PREFIX));
+}
+
 async function applyMonitorBaseline(current, payload) {
   if (payload?.page_type !== "account") return payload;
   const discovered = [...new Set((payload.discovered_urls || []).map(canonicalUrl).filter(Boolean))];
@@ -173,12 +193,18 @@ async function pollQueue() {
       return;
     }
 
+    if (looksLikeContentUrl(task.url) && !(await hasAnyMonitorBaseline())) {
+      try {
+        await reportTaskFailure(cfg, task.id, "等待首次账号基线，旧作品不登记");
+      } catch {}
+      await schedulePoll(1_500);
+      return;
+    }
+
     if (await isBaselineContentUrl(task.url)) {
       try {
         await reportTaskFailure(cfg, task.id, "基线旧作品，按设置跳过");
-      } catch {
-        // The task will be released by the server if this request cannot complete.
-      }
+      } catch {}
       await chrome.storage.local.set({
         lastUploadAt: new Date().toISOString(),
         lastUploadStatus: "success",
@@ -236,6 +262,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const queued = Boolean(current && sender.tab?.id && sender.tab.id === current.tabId);
     if (!queued) {
       sendResponse({ ok: false, skipped: true, reason: "queue_only" });
+      return;
+    }
+
+    if (message.payload?.page_type === "content" && await isBaselineContentUrl(current.url)) {
+      try {
+        await reportTaskFailure(cfg, current.taskId, "基线旧作品，按设置跳过");
+      } catch {}
+      await clearCurrentTask(current, true);
+      await schedulePoll(1_500);
+      sendResponse({ ok: true, skipped: true, reason: "baseline_old_content" });
       return;
     }
 
