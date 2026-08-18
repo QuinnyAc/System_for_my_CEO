@@ -310,7 +310,11 @@ function hasDiscovery(payload) {
 
 async function collect() {
   const payload = extract();
-  if (!payload || (!hasMetric(payload) && !hasDiscovery(payload))) return;
+  if (!payload) return;
+  const metricReady = hasMetric(payload);
+  const discoveryReady = hasDiscovery(payload);
+  if (payload.page_type === "account" && !discoveryReady && performance.now() < 25000) return;
+  if (!metricReady && !discoveryReady) return;
   payload.collector_version = VERSION;
   const fingerprint = JSON.stringify({
     platform: payload.platform,
