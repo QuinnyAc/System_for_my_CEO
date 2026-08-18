@@ -149,11 +149,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     const current = await getCurrentTask();
     const queued = Boolean(current && sender.tab?.id && sender.tab.id === current.tabId);
+
+    // Queue-only mode: ordinary browsing must never create or update business data.
+    if (!queued) {
+      sendResponse({ ok: false, skipped: true, reason: "queue_only" });
+      return;
+    }
+
     const payload = {
       ...message.payload,
       machine_name: cfg.machineName || "",
       collector_version: chrome.runtime.getManifest().version,
-      task_id: queued ? current.taskId : null
+      task_id: current.taskId
     };
 
     try {
@@ -165,13 +172,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await chrome.storage.local.set({
         lastUploadAt: new Date().toISOString(),
         lastUploadStatus: "success",
-        lastUploadMessage: queued ? `自动任务完成：${payload.platform}` : `${payload.platform} ${payload.page_type}`
+        lastUploadMessage: `自动任务完成：${payload.platform}`
       });
 
-      if (queued) {
-        await clearCurrentTask(current, true);
-        await schedulePoll(12_000);
-      }
+      await clearCurrentTask(current, true);
+      await schedulePoll(12_000);
       sendResponse({ ok: true, result });
     } catch (error) {
       await chrome.storage.local.set({
@@ -179,7 +184,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         lastUploadStatus: "error",
         lastUploadMessage: error instanceof Error ? error.message : String(error)
       });
-      if (queued) await failCurrentTask(error instanceof Error ? error.message : String(error));
+      await failCurrentTask(error instanceof Error ? error.message : String(error));
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
     }
   })();
