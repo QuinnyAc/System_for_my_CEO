@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://media_ops_hub:change-me-local@localhost:55432/media_ops_hub"
     cors_origins: str = "http://localhost:3100"
     public_web_url: str = "http://localhost:3100"
-    app_username: str = "admin"
+    app_username: str = "Quinny/WR"
     app_password: str = "change-me-now"
     session_secret: str = "development-only-media-ops-session-secret"
     credentials_secret: str = "development-only-media-ops-credentials-secret"
