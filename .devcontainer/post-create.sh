@@ -5,9 +5,14 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
 fi
 
-APP_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-18)"
-SESSION_SECRET="$(openssl rand -hex 32)"
-CREDENTIALS_SECRET="$(openssl rand -hex 32)"
+random_hex() {
+  local bytes="$1"
+  od -An -N"${bytes}" -tx1 /dev/urandom | tr -d ' \n'
+}
+
+APP_PASSWORD="$(random_hex 12)"
+SESSION_SECRET="$(random_hex 32)"
+CREDENTIALS_SECRET="$(random_hex 32)"
 GENERATED_LOGIN=false
 
 replace_placeholder() {
