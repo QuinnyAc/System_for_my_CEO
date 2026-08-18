@@ -38,18 +38,18 @@ wait_for_url() {
 wait_for_url "http://localhost:3100/" "Web"
 wait_for_url "http://localhost:8100/health" "API"
 wait_for_url "http://localhost:8200/health" "Browser collector"
+wait_for_url "http://localhost:3100/collector/health" "Collector web proxy"
 
 if [[ -n "${CODESPACE_NAME:-}" ]]; then
   PORT_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
   if command -v gh >/dev/null 2>&1; then
-    gh codespace ports visibility 3100:public 8200:public -c "${CODESPACE_NAME}" >/dev/null 2>&1 || true
+    gh codespace ports visibility 3100:public -c "${CODESPACE_NAME}" >/dev/null 2>&1 || true
   fi
   WEB_URL="https://${CODESPACE_NAME}-3100.${PORT_DOMAIN}"
-  COLLECTOR_URL="https://${CODESPACE_NAME}-8200.${PORT_DOMAIN}"
 else
   WEB_URL="http://localhost:3100"
-  COLLECTOR_URL="http://localhost:8200"
 fi
+COLLECTOR_URL="${WEB_URL}/collector"
 
 APP_USERNAME_VALUE="$(sed -n 's/^APP_USERNAME=//p' .env | head -n1)"
 APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-Quinny/WR}"
