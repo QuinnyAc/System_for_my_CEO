@@ -19,7 +19,8 @@ async function load() {
   machineName.value = cfg.machineName;
 
   if (cfg.lastUploadAt) {
-    show(`最近上传：${new Date(cfg.lastUploadAt).toLocaleString()}\n状态：${cfg.lastUploadStatus}\n${cfg.lastUploadMessage || ""}`, cfg.lastUploadStatus === "success" ? "ok" : "error");
+    const kind = cfg.lastUploadStatus === "success" ? "ok" : cfg.lastUploadStatus === "running" ? "" : "error";
+    show(`最近状态：${new Date(cfg.lastUploadAt).toLocaleString()}\n${cfg.lastUploadStatus}\n${cfg.lastUploadMessage || ""}`, kind);
   } else {
     show("尚无上传记录");
   }
@@ -33,7 +34,12 @@ async function save() {
     machineName: machineName.value.trim()
   };
   await chrome.storage.local.set(cfg);
-  show("设置已保存。以后打开支持的平台页面会自动尝试读取公开数字。", "ok");
+  try {
+    await chrome.runtime.sendMessage({ type: "RUN_QUEUE" });
+  } catch {
+    // The background worker will also retry from its heartbeat alarm.
+  }
+  show("设置已保存。手动打开页面会采集；网站队列里的链接也会由这台电脑自动依次读取。", "ok");
   return cfg;
 }
 
@@ -66,7 +72,8 @@ async function test() {
       const detail = await response.text();
       if (!response.ok) throw new Error(`${response.status} ${detail.slice(0, 160)}`);
     }
-    show("连接成功，Collector 地址和 Token 都正确。", "ok");
+    show("连接成功。手动采集和自动链接队列都已启用。", "ok");
+    await chrome.runtime.sendMessage({ type: "RUN_QUEUE" }).catch(() => null);
   } catch (error) {
     show(`连接失败：${error instanceof Error ? error.message : String(error)}`, "error");
   }
