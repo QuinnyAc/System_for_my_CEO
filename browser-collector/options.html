@@ -12,15 +12,14 @@
     .row{display:flex;gap:12px;align-items:center;margin-top:18px}.button{border:0;border-radius:10px;padding:10px 16px;background:#111827;color:white;font-weight:600;cursor:pointer}.secondary{background:#e5e7eb;color:#111827}
     .status{margin-top:16px;padding:10px 12px;border-radius:10px;background:#f1f5f9;font-size:13px;white-space:pre-wrap}.ok{background:#ecfdf5;color:#065f46}.error{background:#fef2f2;color:#991b1b}
     .note{margin-top:18px;padding:12px 14px;border-radius:10px;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.7}
-    code{background:#f1f5f9;padding:2px 5px;border-radius:5px}
   </style>
 </head>
 <body>
   <div class="card">
     <h1>公开数据采集助手</h1>
-    <div class="muted">统一采用链接队列模式。只有你在中央网站主动粘贴并加入队列的作品链接才会被读取和写入系统；平时手动浏览 YouTube、Instagram、Facebook、Pinterest 页面不会自动记录。</div>
+    <div class="muted">只执行中央网站创建的任务：账号监控、新作品发现、手动链接采集和已登记作品的数据更新。平时手动浏览社交平台不会写入系统。</div>
 
-    <label><input id="enabled" type="checkbox" /> 启用自动采集队列</label>
+    <label><input id="enabled" type="checkbox" /> 启用自动采集与账号监控</label>
 
     <label for="collectorUrl">Collector 地址</label>
     <input id="collectorUrl" class="input" placeholder="https://...-3100.app.github.dev/collector" />
@@ -31,7 +30,7 @@
     <label for="machineName">电脑名称</label>
     <input id="machineName" class="input" placeholder="例如 1" />
 
-    <div class="note">使用方式：在中央网站“公开数据采集”页面复制粘贴视频或作品链接 → 加入队列 → 这台电脑在后台依次打开链接 → 读取公开播放、点赞、评论等数据 → 自动关闭 → 继续下一条。不会自动登录、点赞、评论、关注，也不会绕过验证码或平台权限。</div>
+    <div class="note">自动模式：中央网站登记账号主页后，这台电脑会定时在后台检查账号公开页面，发现新作品后自动加入采集队列；作品数据会按时间周期再次读取。也可以继续在“公开数据采集”页面手动粘贴作品链接作为补充。不会自动登录、点赞、评论、关注，也不会绕过验证码或平台权限。</div>
 
     <div class="row">
       <button id="save" class="button">保存设置</button>
