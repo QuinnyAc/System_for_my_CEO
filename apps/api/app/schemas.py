@@ -109,3 +109,28 @@ class ImportResult(BaseModel):
     created: int = 0
     updated: int = 0
     skipped: int = 0
+
+
+class CollectorTaskBatchCreate(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=500)
+    machine_name: str | None = Field(default=None, max_length=120)
+
+
+class CollectorTaskRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    url: str
+    platform: str
+    machine_name: str | None
+    status: str
+    attempts: int
+    last_error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class CollectorTaskBatchResult(BaseModel):
+    created: int = 0
+    skipped: int = 0
+    tasks: list[CollectorTaskRead] = Field(default_factory=list)
