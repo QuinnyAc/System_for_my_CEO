@@ -16,6 +16,21 @@ type Monitor = {
   created_at: string;
 };
 
+type Platform = { id: string; slug: string; name: string };
+type Account = {
+  id: string;
+  platform_id: string;
+  name: string;
+  handle: string | null;
+  profile_url: string | null;
+};
+type AccountMetric = {
+  account_id: string;
+  followers: number;
+  content_count: number;
+  captured_at: string;
+};
+
 const platformLabels: Record<string, string> = {
   youtube: "YouTube（长视频 + 短视频）",
   instagram: "Instagram",
@@ -45,8 +60,40 @@ async function admin<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function appApi<T>(path: string): Promise<T> {
+  const response = await fetch(`/api/v1${path}`, { credentials: "include" });
+  if (!response.ok) throw new Error(`读取账号数据失败 HTTP ${response.status}`);
+  return response.json() as Promise<T>;
+}
+
+function normalizedProfile(value: string) {
+  try {
+    const url = new URL(value);
+    url.hostname = url.hostname.replace(/^www\./, "").toLowerCase();
+    url.search = "";
+    url.hash = "";
+    let path = url.pathname.replace(/\/$/, "") || "/";
+    if (url.hostname.endsWith("youtube.com")) {
+      for (const suffix of ["/videos", "/shorts", "/streams", "/featured"]) {
+        if (path.endsWith(suffix)) path = path.slice(0, -suffix.length) || "/";
+      }
+    }
+    return `${url.hostname}${path}`.toLowerCase();
+  } catch {
+    return value.trim().replace(/^https?:\/\/(www\.)?/i, "").replace(/\/$/, "").toLowerCase();
+  }
+}
+
+function compactNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
 export default function MonitorsPage() {
   const [items, setItems] = useState<Monitor[]>([]);
+  const [platforms, setPlatforms] = useState<Platform[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [metrics, setMetrics] = useState<AccountMetric[]>([]);
   const [platform, setPlatform] = useState("youtube");
   const [name, setName] = useState("");
   const [profileUrl, setProfileUrl] = useState("");
@@ -56,7 +103,16 @@ export default function MonitorsPage() {
   const [error, setError] = useState("");
 
   async function load() {
-    setItems(await admin<Monitor[]>("/monitors"));
+    const [monitorRows, platformRows, accountRows, metricRows] = await Promise.all([
+      admin<Monitor[]>("/monitors"),
+      appApi<Platform[]>("/platforms"),
+      appApi<Account[]>("/accounts"),
+      appApi<AccountMetric[]>("/accounts/metrics/latest"),
+    ]);
+    setItems(monitorRows);
+    setPlatforms(platformRows);
+    setAccounts(accountRows);
+    setMetrics(metricRows);
   }
 
   useEffect(() => {
@@ -85,7 +141,7 @@ export default function MonitorsPage() {
       });
       setName("");
       setProfileUrl("");
-      setNotice("账号已加入自动监控。电脑会自动开始检查新作品。");
+      setNotice("账号已加入监控。第一次检查只同步粉丝数、视频总数并建立旧作品基线；之后只登记新增作品。");
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "添加失败");
@@ -107,18 +163,29 @@ export default function MonitorsPage() {
       method: "PATCH",
       body: JSON.stringify({ enabled: true }),
     });
-    setNotice(`${item.name} 已安排立即检查，采集助手会在下一轮队列中处理。`);
+    setNotice(`${item.name} 已安排立即检查。已有旧作品不会登记，只会同步账号数据并寻找新增作品。`);
     await load();
   }
 
   async function remove(item: Monitor) {
-    if (!confirm(`确定停止并删除“${item.name}”的账号监控吗？已经采集的内容和数据不会删除。`)) return;
+    if (!confirm(`确定停止并删除“${item.name}”的账号监控吗？已经采集的新作品和数据不会删除。`)) return;
     await admin<void>(`/monitors/${item.id}`, { method: "DELETE" });
     await load();
   }
 
   const enabledCount = useMemo(() => items.filter((item) => item.enabled).length, [items]);
   const totalDiscovered = useMemo(() => items.reduce((sum, item) => sum + item.discovered_count, 0), [items]);
+  const platformById = useMemo(() => new Map(platforms.map((item) => [item.id, item])), [platforms]);
+  const metricByAccount = useMemo(() => new Map(metrics.map((item) => [item.account_id, item])), [metrics]);
+
+  function accountForMonitor(item: Monitor) {
+    const target = normalizedProfile(item.profile_url);
+    return accounts.find((account) => {
+      const p = platformById.get(account.platform_id);
+      if (p?.slug !== item.platform || !account.profile_url) return false;
+      return normalizedProfile(account.profile_url) === target;
+    });
+  }
 
   return (
     <>
@@ -126,7 +193,7 @@ export default function MonitorsPage() {
         <div>
           <div className="eyebrow">Account Monitoring</div>
           <h1>账号监控</h1>
-          <p>账号主页只登记一次。电脑会定时检查公开页面，自动发现新作品并加入数据采集队列。</p>
+          <p>每个账号一行：自动同步粉丝数和内容总数。第一次检查只建立旧作品基线，从登记之后才开始记录新增作品。</p>
         </div>
       </header>
 
@@ -134,9 +201,9 @@ export default function MonitorsPage() {
       {error ? <div className="error">{error}</div> : null}
 
       <div className="grid">
-        <div className="card"><div className="metricLabel">监控账号</div><div className="metricValue">{items.length}</div><div className="metricMeta">全部登记账号</div></div>
+        <div className="card"><div className="metricLabel">监控账号</div><div className="metricValue">{items.length}</div><div className="metricMeta">每个账号一条记录</div></div>
         <div className="card"><div className="metricLabel">正在监控</div><div className="metricValue">{enabledCount}</div><div className="metricMeta">自动检查开启</div></div>
-        <div className="card"><div className="metricLabel">自动发现作品</div><div className="metricValue">{totalDiscovered}</div><div className="metricMeta">累计加入采集队列</div></div>
+        <div className="card"><div className="metricLabel">登记后新增作品</div><div className="metricValue">{totalDiscovered}</div><div className="metricMeta">不包含登记前旧作品</div></div>
       </div>
 
       <section className="section card">
@@ -157,7 +224,7 @@ export default function MonitorsPage() {
           <div style={{ alignSelf: "end" }}><button className="button" disabled={saving} onClick={add}>{saving ? "正在添加…" : "开始监控"}</button></div>
         </div>
         <div className="notice" style={{ marginTop: 14 }}>
-          YouTube 只需要填写一次频道主页，系统会自动检查长视频页和 Shorts 页。账号检查默认约每 60 分钟一次；新作品发现后会自动登记并进入数据更新周期。
+          第一次检查：同步账号粉丝数和视频/内容总数，同时把当前已有作品记录为基线但不写入“内容数据”。以后约每 60 分钟检查一次，只要出现新作品才自动登记并持续更新公开数据。
         </div>
       </section>
 
@@ -165,26 +232,36 @@ export default function MonitorsPage() {
         <div className="sectionTitle"><h2>监控列表</h2><span>{items.length}</span></div>
         {items.length === 0 ? <div className="empty">还没有监控账号。</div> : (
           <div className="dataList">
-            {items.map((item) => (
-              <div className="row" key={item.id} style={{ alignItems: "flex-start" }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="rowTitle">{item.name} <span className="pill">{platformLabels[item.platform]}</span></div>
-                  <div className="rowMeta" style={{ overflowWrap: "anywhere" }}>{item.profile_url}</div>
-                  <div className="rowMeta" style={{ marginTop: 6 }}>
-                    状态：<strong>{item.enabled ? "监控中" : "已暂停"}</strong> · 电脑 {item.machine_name || "任意"} · 已发现 {item.discovered_count} 条作品
+            {items.map((item) => {
+              const account = accountForMonitor(item);
+              const metric = account ? metricByAccount.get(account.id) : undefined;
+              return (
+                <div className="row" key={item.id} style={{ alignItems: "flex-start" }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="rowTitle">{item.name} <span className="pill">{platformLabels[item.platform]}</span></div>
+                    <div className="rowMeta" style={{ overflowWrap: "anywhere" }}>{item.profile_url}</div>
+                    <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 12 }}>
+                      <div><div className="metricLabel">粉丝数</div><div style={{ fontSize: 24, fontWeight: 800 }}>{metric ? compactNumber(metric.followers) : "等待同步"}</div></div>
+                      <div><div className="metricLabel">视频/内容总数</div><div style={{ fontSize: 24, fontWeight: 800 }}>{metric ? compactNumber(metric.content_count) : "等待同步"}</div></div>
+                      <div><div className="metricLabel">登记后新增</div><div style={{ fontSize: 24, fontWeight: 800 }}>{item.discovered_count}</div></div>
+                    </div>
+                    <div className="rowMeta" style={{ marginTop: 10 }}>
+                      状态：<strong>{item.enabled ? "监控中" : "已暂停"}</strong> · 电脑 {item.machine_name || "任意"}
+                    </div>
+                    <div className="rowMeta" style={{ marginTop: 4 }}>
+                      最近检查：{item.last_checked_at ? new Date(item.last_checked_at).toLocaleString() : "尚未检查"} · 下次：{item.enabled && item.next_check_at ? new Date(item.next_check_at).toLocaleString() : "—"}
+                    </div>
+                    {metric ? <div className="rowMeta" style={{ marginTop: 4 }}>账号数据快照：{new Date(metric.captured_at).toLocaleString()}</div> : null}
+                    {item.last_error ? <div className="rowMeta" style={{ marginTop: 4 }}>最近错误：{item.last_error}</div> : null}
                   </div>
-                  <div className="rowMeta" style={{ marginTop: 4 }}>
-                    最近检查：{item.last_checked_at ? new Date(item.last_checked_at).toLocaleString() : "尚未检查"} · 下次：{item.enabled && item.next_check_at ? new Date(item.next_check_at).toLocaleString() : "—"}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button className="button secondary" onClick={() => checkNow(item)}>立即检查</button>
+                    <button className="button secondary" onClick={() => toggle(item)}>{item.enabled ? "暂停" : "启用"}</button>
+                    <button className="button danger" onClick={() => remove(item)}>删除</button>
                   </div>
-                  {item.last_error ? <div className="rowMeta" style={{ marginTop: 4 }}>最近错误：{item.last_error}</div> : null}
                 </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  <button className="button secondary" onClick={() => checkNow(item)}>立即检查</button>
-                  <button className="button secondary" onClick={() => toggle(item)}>{item.enabled ? "暂停" : "启用"}</button>
-                  <button className="button danger" onClick={() => remove(item)}>删除</button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
