@@ -61,7 +61,7 @@ set_env_value() {
 }
 
 # Keep the requested application username in every Codespace without storing the password in Git.
-set_env_value "APP_USERNAME" "Quinny/WR"
+set_env_value "APP_USERNAME" "WR"
 
 if replace_placeholder "APP_PASSWORD" "GENERATE_ON_SETUP" "$APP_PASSWORD"; then
   GENERATED_LOGIN=true
@@ -85,7 +85,7 @@ if [[ -n "${CODESPACE_NAME:-}" ]]; then
 fi
 
 APP_USERNAME_VALUE="$(sed -n 's/^APP_USERNAME=//p' .env | head -n1)"
-APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-Quinny/WR}"
+APP_USERNAME_VALUE="${APP_USERNAME_VALUE:-WR}"
 
 if [[ "$GENERATED_LOGIN" == "true" ]]; then
   echo "Media Ops initial login created."
