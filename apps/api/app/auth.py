@@ -6,7 +6,7 @@ from jwt import InvalidTokenError
 
 from app.config import settings
 
-COOKIE_NAME = "zeno_social_ops_session"
+COOKIE_NAME = "media_ops_hub_session"
 
 
 def credentials_valid(username: str, password: str) -> bool:
@@ -15,7 +15,7 @@ def credentials_valid(username: str, password: str) -> bool:
 
 def create_session_token() -> str:
     now = datetime.now(timezone.utc)
-    return jwt.encode({"sub": settings.app_username, "iat": now, "exp": now + timedelta(hours=12), "system": "zeno_social_ops"}, settings.session_secret, algorithm="HS256")
+    return jwt.encode({"sub": settings.app_username, "iat": now, "exp": now + timedelta(hours=12), "system": "media_ops_hub"}, settings.session_secret, algorithm="HS256")
 
 
 def session_valid(token: str | None) -> bool:
@@ -23,6 +23,6 @@ def session_valid(token: str | None) -> bool:
         return False
     try:
         payload = jwt.decode(token, settings.session_secret, algorithms=["HS256"])
-        return payload.get("sub") == settings.app_username and payload.get("system") == "zeno_social_ops"
+        return payload.get("sub") == settings.app_username and payload.get("system") == "media_ops_hub"
     except InvalidTokenError:
         return False
