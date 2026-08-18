@@ -1,9 +1,11 @@
-from sqlalchemy import select
+from uuid import UUID
+
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.auth import COOKIE_NAME, create_session_token
-from app.collector_app import app, normalize_url
-from app.db import SessionLocal
+from app.collector_app import app, seed_platforms
+from app.db import Base, SessionLocal, engine
 from app.models import (
     CollectorTask,
     ContentMetricSnapshot,
@@ -20,7 +22,13 @@ TOKEN = "media-ops-ci-collector-token"
 COLLECTOR_HEADERS = {"X-Collector-Token": TOKEN}
 
 
+def _ensure_db() -> None:
+    Base.metadata.create_all(bind=engine)
+    seed_platforms()
+
+
 def _remove_profile(profile_url: str) -> None:
+    _ensure_db()
     with SessionLocal() as db:
         platform = db.scalar(select(Platform).where(Platform.slug == "youtube"))
         if platform:
@@ -38,9 +46,7 @@ def _remove_profile(profile_url: str) -> None:
             )
         ):
             db.delete(monitor)
-        for task in db.scalars(
-            select(CollectorTask).where(CollectorTask.url.like(f"{profile_url}%"))
-        ):
+        for task in db.scalars(select(CollectorTask).where(CollectorTask.url.like(f"{profile_url}%"))):
             db.delete(task)
         db.commit()
 
@@ -86,8 +92,8 @@ def test_atomic_account_create_is_idempotent_and_delete_cleans_monitor() -> None
         assert deleted.status_code == 204, deleted.text
 
         with SessionLocal() as db:
-            assert db.get(SocialAccount, data["account_id"]) is None
-            assert db.get(MonitoredAccount, data["monitor_id"]) is None
+            assert db.get(SocialAccount, UUID(data["account_id"])) is None
+            assert db.get(MonitoredAccount, UUID(data["monitor_id"])) is None
             remaining = list(
                 db.scalars(
                     select(CollectorTask).where(
@@ -256,9 +262,7 @@ def test_first_scan_is_baseline_and_later_content_belongs_to_existing_account() 
             assert snapshot.extra_metrics["known"]["views"] is True
             assert snapshot.extra_metrics["known"]["saves"] is False
 
-        deleted_client = TestClient(app)
-        deleted_client.cookies.set(COOKIE_NAME, create_session_token())
-        with deleted_client:
-            deleted = deleted_client.delete(f"/admin/accounts/{account_id}")
-            assert deleted.status_code == 204, deleted.text
+        client.cookies.set(COOKIE_NAME, create_session_token())
+        deleted = client.delete(f"/admin/accounts/{account_id}")
+        assert deleted.status_code == 204, deleted.text
     _remove_profile(profile)
