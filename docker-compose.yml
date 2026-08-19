@@ -45,7 +45,7 @@ services:
         condition: service_healthy
     volumes:
       - ./apps/api:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8100 --reload
+    command: uvicorn app.runtime_app:app --host 0.0.0.0 --port 8100 --reload
 
   collector:
     build:
@@ -66,15 +66,10 @@ services:
       context: ./apps/web
     environment:
       API_INTERNAL_URL: http://api:8100
-      COLLECTOR_INTERNAL_URL: http://collector:8200
-      COLLECTOR_HOST_URL: http://host.docker.internal:8200
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "${WEB_PORT:-3100}:3100"
     depends_on:
       - api
-      - collector
     volumes:
       - ./apps/web:/app
       - media_ops_hub_web_node_modules:/app/node_modules
