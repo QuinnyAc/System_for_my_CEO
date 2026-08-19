@@ -64,6 +64,8 @@ jobs:
       - run: node --check browser-collector/youtube-account-metrics.js
       - run: node --check browser-collector/youtube-main-world.js
       - run: node --check browser-collector/options.js
+      - run: node browser-collector/tests/youtube-main-world.test.js
+      - run: node browser-collector/tests/service-worker-account-wait.test.js
       - run: node -e "JSON.parse(require('fs').readFileSync('browser-collector/manifest.json','utf8')); console.log('manifest ok')"
       - name: Verify collector manifest version and YouTube main-world registration
         run: |

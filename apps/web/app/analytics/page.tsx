@@ -58,30 +58,42 @@ export default function AnalyticsPage() {
   }, []);
 
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
-  const contentMap = useMemo(() => new Map(content.map((c) => [c.id, c])), [content]);
+  const visibleContent = useMemo(() => content.filter((item) => {
+    const account = accountMap.get(item.account_id);
+    if (!account?.baseline_at) return false;
+    const baseline = new Date(account.baseline_at).getTime();
+    const registered = new Date(item.created_at).getTime();
+    return Number.isFinite(baseline) && Number.isFinite(registered) && registered >= baseline;
+  }), [content, accountMap]);
+  const visibleContentMap = useMemo(() => new Map(visibleContent.map((item) => [item.id, item])), [visibleContent]);
+  const visibleContentIds = useMemo(() => new Set(visibleContent.map((item) => item.id)), [visibleContent]);
+  const visibleMetrics = useMemo(
+    () => contentMetrics.filter((metric) => visibleContentIds.has(metric.content_id)),
+    [contentMetrics, visibleContentIds]
+  );
   const ranked = useMemo(
-    () => contentMetrics.filter((m) => contentKnown(m, "views")).sort((a, b) => b.views - a.views).slice(0, 10),
-    [contentMetrics]
+    () => visibleMetrics.filter((m) => contentKnown(m, "views")).sort((a, b) => b.views - a.views).slice(0, 10),
+    [visibleMetrics]
   );
   const knownFollowers = accountMetrics.filter(followerKnown);
-  const knownViews = contentMetrics.filter((metric) => contentKnown(metric, "views"));
+  const knownViews = visibleMetrics.filter((metric) => contentKnown(metric, "views"));
   const followerTotal = knownFollowers.reduce((sum, metric) => sum + metric.followers, 0);
   const viewTotal = knownViews.reduce((sum, metric) => sum + metric.views, 0);
 
   return <>
-    <header className="pageHeader"><div><div className="eyebrow">Analytics</div><h1>数据分析</h1><p>基于每个账号和作品的最新公开快照汇总。未成功读取的指标不会按 0 参与排名或合计。</p></div></header>
+    <header className="pageHeader"><div><div className="eyebrow">Analytics</div><h1>数据分析</h1><p>只统计账号建立基线之后发现的新作品及其最新公开快照。历史作品不会进入排名或播放量合计；未成功读取的指标不会按 0 计算。</p></div></header>
     {error ? <div className="error">{error}</div> : null}
     <div className="grid">
       <div className="card"><div className="metricLabel">账号快照</div><div className="metricValue">{accountMetrics.length}</div><div className="metricMeta">{accounts.length} 个账号</div></div>
-      <div className="card"><div className="metricLabel">内容快照</div><div className="metricValue">{contentMetrics.length}</div><div className="metricMeta">{content.length} 条内容</div></div>
+      <div className="card"><div className="metricLabel">登记后内容快照</div><div className="metricValue">{visibleMetrics.length}</div><div className="metricMeta">{visibleContent.length} 条登记后新内容</div></div>
       <div className="card"><div className="metricLabel">总粉丝 / 订阅</div><div className="metricValue">{knownFollowers.length ? formatNumber(followerTotal) : "—"}</div><div className="metricMeta">已获得 {knownFollowers.length}/{accounts.length} 个账号</div></div>
-      <div className="card"><div className="metricLabel">内容播放 / 浏览</div><div className="metricValue">{knownViews.length ? formatNumber(viewTotal) : "—"}</div><div className="metricMeta">已获得 {knownViews.length}/{content.length} 条内容</div></div>
+      <div className="card"><div className="metricLabel">新内容播放 / 浏览</div><div className="metricValue">{knownViews.length ? formatNumber(viewTotal) : "—"}</div><div className="metricMeta">已获得 {knownViews.length}/{visibleContent.length} 条新内容</div></div>
     </div>
     <section className="section">
-      <div className="sectionTitle"><h2>当前表现最高内容</h2><span>按已读取播放/浏览量</span></div>
-      {ranked.length === 0 ? <div className="empty">暂无可用于播放量排名的内容数据</div> : (
+      <div className="sectionTitle"><h2>登记后表现最高内容</h2><span>按已读取播放/浏览量</span></div>
+      {ranked.length === 0 ? <div className="empty">暂无登记后新作品可用于播放量排名</div> : (
         <div className="dataList">{ranked.map((metric) => {
-          const item = contentMap.get(metric.content_id);
+          const item = visibleContentMap.get(metric.content_id);
           const account = item ? accountMap.get(item.account_id) : undefined;
           return <div className="row" key={metric.id}>
             <div>

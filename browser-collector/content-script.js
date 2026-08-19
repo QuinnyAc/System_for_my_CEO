@@ -1,4 +1,4 @@
-const VERSION = "0.5.1";
+const VERSION = "0.5.3";
 
 function text(selector) {
   const node = document.querySelector(selector);
