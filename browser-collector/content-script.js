@@ -1,4 +1,4 @@
-const VERSION = "0.5.0";
+const VERSION = "0.5.1";
 
 function text(selector) {
   const node = document.querySelector(selector);
@@ -96,6 +96,10 @@ function uniqueLinks(nodes, accept, limit = 80) {
   return found;
 }
 
+function feedSettled(minMs = 18000) {
+  return performance.now() >= minMs;
+}
+
 function youtubeDiscoveredLinks() {
   return uniqueLinks(
     document.querySelectorAll('a[href^="/watch?v="], a[href^="/shorts/"]'),
@@ -187,8 +191,9 @@ function youtube() {
     if (followers === null) followers = countNear(source, ["subscribers", "subscriber", "订阅者", "位订阅者"]);
     const contentCount = countNear(source, ["videos", "video", "视频"]);
     const discovered = youtubeDiscoveredLinks();
-    const ready = discovered.length > 0 || Boolean(document.querySelector("ytd-browse, ytd-rich-grid-renderer, ytd-two-column-browse-results-renderer"));
     const emptyText = /no videos|hasn['’]t uploaded|no shorts|暂无视频|没有视频|尚未上传/i.test(source);
+    const empty = contentCount === 0 || emptyText;
+    const ready = empty || (discovered.length > 0 && feedSettled(14000));
     return {
       platform: "youtube",
       page_type: "account",
@@ -200,7 +205,7 @@ function youtube() {
       metrics: { followers, content_count: contentCount },
       discovered_urls: discovered,
       discovery_complete: ready,
-      feed_empty: contentCount === 0 || emptyText
+      feed_empty: empty
     };
   }
 
@@ -248,8 +253,9 @@ function instagram() {
     const followers = countNear(source, ["followers", "follower", "粉丝"]);
     const posts = countNear(source, ["posts", "post", "帖子", "贴文"]);
     const discovered = instagramDiscoveredLinks();
-    const ready = discovered.length > 0 || Boolean(document.querySelector("main"));
     const emptyText = /no posts yet|no posts|还没有帖子|暂无帖子/i.test(source);
+    const empty = posts === 0 || emptyText;
+    const ready = empty || (discovered.length > 0 && feedSettled(18000));
     return {
       platform: "instagram",
       page_type: "account",
@@ -261,7 +267,7 @@ function instagram() {
       metrics: { followers, content_count: posts },
       discovered_urls: discovered,
       discovery_complete: ready,
-      feed_empty: posts === 0 || emptyText
+      feed_empty: empty
     };
   }
 
@@ -296,8 +302,9 @@ function facebook() {
     const followers = countNear(source, ["followers", "follower", "粉丝"]);
     const posts = countNear(source, ["posts", "post", "videos", "reels", "帖子", "视频"]);
     const discovered = facebookDiscoveredLinks();
-    const ready = discovered.length > 0 || Boolean(document.querySelector('main, [role="main"]'));
     const emptyText = /no posts yet|no posts available|暂无帖子|没有帖子/i.test(source);
+    const empty = posts === 0 || emptyText;
+    const ready = empty || (discovered.length > 0 && feedSettled(18000));
     return {
       platform: "facebook",
       page_type: "account",
@@ -309,7 +316,7 @@ function facebook() {
       metrics: { followers, content_count: posts },
       discovered_urls: discovered,
       discovery_complete: ready,
-      feed_empty: posts === 0 || emptyText
+      feed_empty: empty
     };
   }
 
@@ -343,8 +350,9 @@ function pinterest() {
     const followers = countNear(source, ["followers", "follower", "粉丝"]);
     const pins = countNear(source, ["pins", "pin", "图钉"]);
     const discovered = pinterestDiscoveredLinks();
-    const ready = discovered.length > 0 || Boolean(document.querySelector('main, [data-test-id="profile-header"]'));
     const emptyText = /no pins yet|no pins|暂无 pin|暂无图钉/i.test(source);
+    const empty = pins === 0 || emptyText;
+    const ready = empty || (discovered.length > 0 && feedSettled(18000));
     return {
       platform: "pinterest",
       page_type: "account",
@@ -356,7 +364,7 @@ function pinterest() {
       metrics: { followers, content_count: pins },
       discovered_urls: discovered,
       discovery_complete: ready,
-      feed_empty: pins === 0 || emptyText
+      feed_empty: empty
     };
   }
 
@@ -398,8 +406,8 @@ async function collect() {
   const metricReady = hasMetric(payload);
   const discoveryReady = hasDiscovery(payload);
   if (payload.page_type === "account") {
-    if (!payload.discovery_complete && performance.now() < 22000) return;
-    if (!metricReady && !discoveryReady && !payload.discovery_complete) return;
+    if (!payload.discovery_complete && !payload.feed_empty) return;
+    if (!metricReady && !discoveryReady && !payload.feed_empty) return;
   } else if (!metricReady) {
     return;
   }
