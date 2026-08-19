@@ -103,26 +103,40 @@ function ytMetricIsAccountPage() {
   return Boolean(parts[0]?.startsWith("@") || (["channel", "user", "c"].includes(parts[0]) && parts[1]));
 }
 
+function ytMetricMainWorld() {
+  const raw = document.documentElement?.getAttribute("data-media-ops-yt-account-metrics") || "";
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function ytMetricExtract() {
   if (!ytMetricIsAccountPage()) return null;
   const body = ytMetricBodyText();
+  const main = ytMetricMainWorld();
 
-  let followers = null;
-  for (const selector of [
-    "#subscriber-count",
-    "yt-content-metadata-view-model .yt-content-metadata-view-model-wiz__metadata-text",
-    "yt-content-metadata-view-model span",
-    "ytd-c4-tabbed-header-renderer #subscriber-count"
-  ]) {
-    for (const node of document.querySelectorAll(selector)) {
-      const source = `${node.textContent || ""} ${node.getAttribute("aria-label") || ""}`;
-      const value = ytMetricCountNear(source, ["subscribers", "subscriber", "订阅者", "位订阅者"]);
-      if (value !== null) {
-        followers = value;
-        break;
+  let followers = Number.isFinite(main?.followers) ? main.followers : null;
+  if (followers === null) {
+    for (const selector of [
+      "#subscriber-count",
+      "yt-content-metadata-view-model .yt-content-metadata-view-model-wiz__metadata-text",
+      "yt-content-metadata-view-model span",
+      "ytd-c4-tabbed-header-renderer #subscriber-count"
+    ]) {
+      for (const node of document.querySelectorAll(selector)) {
+        const source = `${node.textContent || ""} ${node.getAttribute("aria-label") || ""}`;
+        const value = ytMetricCountNear(source, ["subscribers", "subscriber", "订阅者", "位订阅者"]);
+        if (value !== null) {
+          followers = value;
+          break;
+        }
       }
+      if (followers !== null) break;
     }
-    if (followers !== null) break;
   }
   if (followers === null) {
     followers = ytMetricCountNear(body, ["subscribers", "subscriber", "订阅者", "位订阅者"]);
@@ -134,7 +148,10 @@ function ytMetricExtract() {
     );
   }
 
-  let contentCount = ytMetricCountNear(body, ["videos", "video", "视频", "个视频"]);
+  let contentCount = Number.isFinite(main?.content_count) ? main.content_count : null;
+  if (contentCount === null) {
+    contentCount = ytMetricCountNear(body, ["videos", "video", "视频", "个视频"]);
+  }
   if (contentCount === null) {
     contentCount = ytMetricFromScripts(
       ["videoCountText", "videosCountText", "contentCountText", "videoCount"],
@@ -144,10 +161,10 @@ function ytMetricExtract() {
 
   if (!Number.isFinite(followers) && !Number.isFinite(contentCount)) return null;
 
-  const profileUrl = ytMetricProfileUrl();
+  const profileUrl = main?.profile_url || ytMetricProfileUrl();
   const pathParts = location.pathname.split("/").filter(Boolean);
   const handle = pathParts[0]?.startsWith("@") ? pathParts[0] : "";
-  const title = (document.querySelector('meta[property="og:title"]')?.getAttribute("content") || document.title || "")
+  const title = String(main?.title || document.querySelector('meta[property="og:title"]')?.getAttribute("content") || document.title || "")
     .replace(/\s*[|·-]\s*YouTube\s*$/i, "")
     .trim();
 
@@ -158,6 +175,7 @@ function ytMetricExtract() {
     title,
     account_name: title,
     handle,
+    external_id: main?.external_id || "",
     profile_url: profileUrl || location.href,
     metrics: {
       followers: Number.isFinite(followers) ? followers : null,
@@ -187,7 +205,8 @@ async function ytMetricSend() {
 }
 
 if (ytMetricIsAccountPage()) {
-  const retryDelays = [4500, 8500, 13500, 20000, 30000];
+  document.addEventListener("media-ops-yt-account-metrics-ready", () => ytMetricSend().catch(() => null));
+  const retryDelays = [2500, 4500, 7500, 10500, 13500, 18000, 24000, 32000];
   for (const delay of retryDelays) {
     setTimeout(() => ytMetricSend().catch(() => null), delay);
   }
