@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const collectorTargets = Array.from(new Set([
-  (process.env.COLLECTOR_INTERNAL_URL || "http://collector:8200").replace(/\/$/, ""),
-  (process.env.COLLECTOR_HOST_URL || "http://host.docker.internal:8200").replace(/\/$/, ""),
-]));
+const apiTarget = (process.env.API_INTERNAL_URL || "http://api:8100").replace(/\/$/, "");
 
 export const dynamic = "force-dynamic";
 
@@ -33,42 +30,32 @@ async function proxyCollector(request: NextRequest, context: RouteContext) {
   const method = request.method.toUpperCase();
   const hasBody = !["GET", "HEAD", "OPTIONS"].includes(method);
   const body = hasBody ? await request.arrayBuffer() : undefined;
-  const failures: string[] = [];
 
-  for (const target of collectorTargets) {
-    try {
-      const upstream = await fetch(`${target}/${safePath}${request.nextUrl.search || ""}`, {
-        method,
-        headers: copyRequestHeaders(request),
-        body: body && body.byteLength ? body : undefined,
-        cache: "no-store",
-        signal: AbortSignal.timeout(20_000),
-      });
+  try {
+    const upstream = await fetch(`${apiTarget}/collector/${safePath}${request.nextUrl.search || ""}`, {
+      method,
+      headers: copyRequestHeaders(request),
+      body: body && body.byteLength ? body : undefined,
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
 
-      const data = await upstream.arrayBuffer();
-      if (upstream.status >= 500 && collectorTargets.length > 1) {
-        failures.push(`${target}: HTTP ${upstream.status}`);
-        continue;
-      }
-
-      const responseHeaders = new Headers(corsHeaders);
-      responseHeaders.set(
-        "Content-Type",
-        upstream.headers.get("content-type") || "application/json; charset=utf-8",
-      );
-      return new NextResponse(data.byteLength ? data : null, {
-        status: upstream.status,
-        headers: responseHeaders,
-      });
-    } catch (error) {
-      failures.push(`${target}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    const data = await upstream.arrayBuffer();
+    const responseHeaders = new Headers(corsHeaders);
+    responseHeaders.set(
+      "Content-Type",
+      upstream.headers.get("content-type") || "application/json; charset=utf-8",
+    );
+    return new NextResponse(data.byteLength ? data : null, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { detail: `采集服务暂时不可用：主 API Collector 无法连接：${error instanceof Error ? error.message : String(error)}` },
+      { status: 503, headers: corsHeaders },
+    );
   }
-
-  return NextResponse.json(
-    { detail: `采集服务暂时不可用：${failures.join("；")}` },
-    { status: 503, headers: corsHeaders },
-  );
 }
 
 export async function OPTIONS() {
