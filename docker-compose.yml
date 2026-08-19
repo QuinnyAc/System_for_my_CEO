@@ -67,6 +67,9 @@ services:
     environment:
       API_INTERNAL_URL: http://api:8100
       COLLECTOR_INTERNAL_URL: http://collector:8200
+      COLLECTOR_HOST_URL: http://host.docker.internal:8200
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${WEB_PORT:-3100}:3100"
     depends_on:
