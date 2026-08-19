@@ -37,7 +37,7 @@ wait_for_url() {
 }
 
 wait_for_url "http://localhost:8100/health" "API"
-wait_for_url "http://localhost:8200/health" "Browser collector"
+wait_for_url "http://localhost:8100/collector/health" "Embedded browser collector"
 wait_for_url "http://localhost:3100/login" "Web"
 wait_for_url "http://localhost:3100/collector/health" "Collector web proxy"
 
