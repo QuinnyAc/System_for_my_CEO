@@ -26,6 +26,12 @@ const manifest = JSON.parse(fs.readFileSync('browser-collector/manifest.json', '
 if (!/^\d+\.\d+\.\d+$/.test(manifest.version)) {
   throw new Error(`Invalid extension version: ${manifest.version}`);
 }
+const contentScript = fs.readFileSync('browser-collector/content-script.js', 'utf8');
+const versionMatch = contentScript.match(/const VERSION = \"([^\"]+)\"/);
+if (!versionMatch) throw new Error('content-script.js VERSION is missing');
+if (versionMatch[1] !== manifest.version) {
+  throw new Error(`Extension version mismatch: manifest=${manifest.version} content-script=${versionMatch[1]}`);
+}
 const mainWorld = (manifest.content_scripts || []).find((entry) =>
   entry.world === 'MAIN' && Array.isArray(entry.js) && entry.js.includes('youtube-main-world.js')
 );
