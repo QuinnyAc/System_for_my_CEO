@@ -5,7 +5,7 @@ import { api, formatNumber } from "@/lib/api";
 import type { AccountMetric, Platform, PublishedContent, SocialAccount } from "@/lib/types";
 
 type AccountMetricKey = "followers" | "content_count";
-type MonitorRead = { id: string; platform: string; profile_url: string; enabled: boolean };
+type AdminTaskBatchResult = { created: number; skipped: number };
 
 type AccountGroupView = {
   key: string;
@@ -42,10 +42,19 @@ function groupFallbackKey(name: string) {
   return `name:${name.trim().replace(/\s+/g, " ").toLocaleLowerCase()}`;
 }
 
-function sameProfile(left: string | null, right: string) {
-  if (!left) return false;
-  const clean = (value: string) => value.trim().replace(/\/$/, "").replace(/^https:\/\/www\./, "https://");
-  return clean(left) === clean(right);
+function errorText(reason: unknown) {
+  return reason instanceof Error ? reason.message : String(reason || "未知错误");
+}
+
+function normalizedProfile(value: string) {
+  return value.trim().replace(/\/$/, "");
+}
+
+function accountFeedUrls(account: SocialAccount, platform: Platform | undefined) {
+  if (!platform || !account.profile_url) return [] as string[];
+  const base = normalizedProfile(account.profile_url);
+  if (platform.slug === "youtube") return [`${base}/videos`, `${base}/shorts`];
+  return [base];
 }
 
 async function collectorAdmin<T>(path: string, init?: RequestInit): Promise<T> {
@@ -81,21 +90,32 @@ export default function Dashboard() {
   const [error, setError] = useState("");
 
   async function load() {
-    const [p, a, m, c] = await Promise.all([
+    const results = await Promise.allSettled([
       api<Platform[]>("/platforms"),
       api<SocialAccount[]>("/accounts"),
       api<AccountMetric[]>("/accounts/metrics/latest"),
       api<PublishedContent[]>("/content"),
     ]);
-    setPlatforms(p);
-    setAccounts(a);
-    setMetrics(m);
-    setContent(c);
-    setError("");
+    const labels = ["平台目录", "账号列表", "账号快照", "内容数据"];
+    const failures: string[] = [];
+
+    if (results[0].status === "fulfilled") setPlatforms(results[0].value);
+    else failures.push(`${labels[0]}加载失败：${errorText(results[0].reason)}`);
+
+    if (results[1].status === "fulfilled") setAccounts(results[1].value);
+    else failures.push(`${labels[1]}加载失败：${errorText(results[1].reason)}`);
+
+    if (results[2].status === "fulfilled") setMetrics(results[2].value);
+    else failures.push(`${labels[2]}加载失败：${errorText(results[2].reason)}`);
+
+    if (results[3].status === "fulfilled") setContent(results[3].value);
+    else failures.push(`${labels[3]}加载失败：${errorText(results[3].reason)}`);
+
+    setError(failures.join("；"));
   }
 
   useEffect(() => {
-    load().catch((e) => setError(e instanceof Error ? e.message : "读取失败"));
+    load().catch((e) => setError(errorText(e)));
     const timer = window.setInterval(() => load().catch(() => null), 30_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -137,38 +157,30 @@ export default function Dashboard() {
     setError("");
     setNotice("");
     try {
-      const monitors = await collectorAdmin<MonitorRead[]>("/monitors");
-      let queuedFeeds = 0;
-      for (const account of group.accounts) {
-        const platform = platformMap.get(account.platform_id);
-        if (!platform || !account.profile_url) continue;
-        const monitor = monitors.find((item) => item.platform === platform.slug && sameProfile(account.profile_url, item.profile_url));
-        if (!monitor) continue;
-        await collectorAdmin(`/monitors/${monitor.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ enabled: true }),
-        });
-        queuedFeeds += 1;
-      }
-
+      const feedUrls = group.accounts.flatMap((account) => accountFeedUrls(account, platformMap.get(account.platform_id)));
       const groupAccountIds = new Set(group.accounts.map((account) => account.id));
-      const urls = visibleContent
+      const contentUrls = visibleContent
         .filter((item) => groupAccountIds.has(item.account_id) && item.url)
         .map((item) => item.url as string);
-      if (urls.length) {
-        await collectorAdmin("/tasks/batch", {
-          method: "POST",
-          body: JSON.stringify({ urls, machine_name: null }),
-        });
+      const urls = Array.from(new Set([...feedUrls, ...contentUrls]));
+
+      if (!feedUrls.length) {
+        throw new Error("这个账号组没有可同步的主页地址，请到账号管理检查主页链接。 ");
       }
 
-      if (!queuedFeeds) {
-        throw new Error("没有找到该账号组对应的后台监控，请到账号管理确认主页地址。 ");
-      }
-      setNotice(`“${group.name}”已加入立即同步队列：正在检查 ${queuedFeeds} 个平台账号及已登记新作品。`);
+      const result = await collectorAdmin<AdminTaskBatchResult>("/tasks/batch", {
+        method: "POST",
+        body: JSON.stringify({ urls, machine_name: null }),
+      });
+
+      const alreadyQueued = Math.max(0, urls.length - result.created);
+      setNotice(
+        `“${group.name}”已触发立即同步：新增 ${result.created} 个采集任务` +
+        (alreadyQueued ? `，${alreadyQueued} 个任务已在队列中。` : "。")
+      );
       window.setTimeout(() => load().catch(() => null), 2500);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "立即同步失败");
+      setError(`立即同步失败：${errorText(e)}`);
     } finally {
       setSyncing(null);
     }
