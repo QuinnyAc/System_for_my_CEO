@@ -45,20 +45,28 @@ if [[ -n "${CODESPACE_NAME:-}" ]]; then
   PORT_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
   if command -v gh >/dev/null 2>&1; then
     echo "Ensuring Codespace port 3100 is public for the Chrome collector..."
-    if ! gh codespace ports visibility 3100:public -c "${CODESPACE_NAME}" >/dev/null 2>&1; then
-      echo "WARNING: Could not set port 3100 to public automatically." >&2
-      echo "Run: gh codespace ports visibility 3100:public -c ${CODESPACE_NAME}" >&2
-    fi
+    VISIBILITY=""
+    for attempt in $(seq 1 12); do
+      gh codespace ports visibility 3100:public -c "${CODESPACE_NAME}" >/dev/null 2>&1 || true
+      VISIBILITY="$(gh codespace ports -c "${CODESPACE_NAME}" --json sourcePort,visibility --jq '.[] | select(.sourcePort==3100) | .visibility' 2>/dev/null | head -n1 || true)"
+      if [[ "$VISIBILITY" == "public" ]]; then
+        break
+      fi
+      echo "Port 3100 is not public yet (attempt ${attempt}/12); retrying..."
+      sleep 2
+    done
 
-    VISIBILITY="$(gh codespace ports -c "${CODESPACE_NAME}" --json sourcePort,visibility --jq '.[] | select(.sourcePort==3100) | .visibility' 2>/dev/null | head -n1 || true)"
     if [[ "$VISIBILITY" == "public" ]]; then
       echo "Codespace port 3100 visibility: public"
     else
       echo "WARNING: Codespace port 3100 visibility is '${VISIBILITY:-unknown}'." >&2
-      echo "The Chrome extension cannot reach a private Codespace forwarding URL without GitHub authentication." >&2
+      echo "The application is running locally, but the forwarded URL may not open externally." >&2
       echo "Set port 3100 to Public from the PORTS panel, or run:" >&2
       echo "  gh codespace ports visibility 3100:public -c ${CODESPACE_NAME}" >&2
     fi
+  else
+    echo "WARNING: GitHub CLI is unavailable, so port 3100 visibility could not be verified." >&2
+    echo "Set port 3100 to Public from the PORTS panel if the forwarded URL does not open." >&2
   fi
   WEB_URL="https://${CODESPACE_NAME}-3100.${PORT_DOMAIN}"
 else
