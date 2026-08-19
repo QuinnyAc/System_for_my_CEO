@@ -15,14 +15,22 @@ fi
 
 node --check browser-collector/service-worker.js >/dev/null
 node --check browser-collector/content-script.js >/dev/null
+node --check browser-collector/youtube-account-metrics.js >/dev/null
+node --check browser-collector/youtube-main-world.js >/dev/null
 node --check browser-collector/options.js >/dev/null
 
 MANIFEST_VERSION="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('browser-collector/manifest.json','utf8')).version)")"
-SCRIPT_VERSION="$(node -e "const s=require('fs').readFileSync('browser-collector/content-script.js','utf8'); const m=s.match(/const VERSION = \\\"([^\\\"]+)\\\"/); if(!m) process.exit(2); process.stdout.write(m[1])")"
-if [[ "$MANIFEST_VERSION" != "$SCRIPT_VERSION" ]]; then
-  echo "Extension version mismatch: manifest=$MANIFEST_VERSION content-script=$SCRIPT_VERSION" >&2
-  exit 1
-fi
+node - <<'NODE'
+const fs = require('fs');
+const manifest = JSON.parse(fs.readFileSync('browser-collector/manifest.json', 'utf8'));
+if (!/^\d+\.\d+\.\d+$/.test(manifest.version)) {
+  throw new Error(`Invalid extension version: ${manifest.version}`);
+}
+const mainWorld = (manifest.content_scripts || []).find((entry) =>
+  entry.world === 'MAIN' && Array.isArray(entry.js) && entry.js.includes('youtube-main-world.js')
+);
+if (!mainWorld) throw new Error('youtube-main-world.js is not registered in MAIN world');
+NODE
 
 OUTPUT="media-ops-public-collector.zip"
 rm -f "$OUTPUT"
