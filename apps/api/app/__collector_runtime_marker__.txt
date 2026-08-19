@@ -1,0 +1,1 @@
+Collector browser traffic is embedded in app.runtime_app and mounted at /collector.
