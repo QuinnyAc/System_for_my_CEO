@@ -69,6 +69,13 @@ export default function ContentPage() {
   const amap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const pmap = useMemo(() => new Map(platforms.map((p) => [p.id, p])), [platforms]);
   const mmap = useMemo(() => new Map(metrics.map((m) => [m.content_id, m])), [metrics]);
+  const visibleItems = useMemo(() => items.filter((item) => {
+    const account = amap.get(item.account_id);
+    if (!account?.baseline_at) return false;
+    const baseline = new Date(account.baseline_at).getTime();
+    const registered = new Date(item.created_at).getTime();
+    return Number.isFinite(baseline) && Number.isFinite(registered) && registered >= baseline;
+  }), [items, amap]);
 
   return (
     <>
@@ -76,16 +83,16 @@ export default function ContentPage() {
         <div>
           <div className="eyebrow">Published Content</div>
           <h1>内容数据</h1>
-          <p>这里只显示已登记的作品及其公开可见数据。平台未公开或尚未成功读取的指标显示为 —，不会再用 0 代替未知值。</p>
+          <p>只显示账号建立基线之后发现的新作品。历史作品不会进入运营内容列表；平台未公开或尚未成功读取的指标显示为 —。</p>
         </div>
       </header>
       {error ? <div className="error">{error}</div> : null}
 
       <section className="section">
-        <div className="sectionTitle"><h2>内容列表</h2><span>{items.length}</span></div>
-        {items.length === 0 ? <div className="empty">目前还没有登记之后发现的新作品。新作品被发现后会自动出现在这里。</div> : (
+        <div className="sectionTitle"><h2>内容列表</h2><span>{visibleItems.length}</span></div>
+        {visibleItems.length === 0 ? <div className="empty">目前还没有账号添加之后发现的新作品。以后发布的新作品会自动出现在这里。</div> : (
           <div className="dataList">
-            {items.map((item) => {
+            {visibleItems.map((item) => {
               const metric = mmap.get(item.id);
               const account = amap.get(item.account_id);
               const platform = account ? pmap.get(account.platform_id) : undefined;
