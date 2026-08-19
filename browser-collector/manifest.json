@@ -21,6 +21,13 @@
   "content_scripts": [
     {
       "matches": [
+        "https://*.youtube.com/*"
+      ],
+      "js": ["youtube-account-metrics.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "https://*.youtube.com/*",
         "https://youtu.be/*",
         "https://*.instagram.com/*",

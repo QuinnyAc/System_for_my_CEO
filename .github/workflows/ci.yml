@@ -61,6 +61,7 @@ jobs:
           node-version: "22"
       - run: node --check browser-collector/service-worker.js
       - run: node --check browser-collector/content-script.js
+      - run: node --check browser-collector/youtube-account-metrics.js
       - run: node --check browser-collector/options.js
       - run: node -e "JSON.parse(require('fs').readFileSync('browser-collector/manifest.json','utf8')); console.log('manifest ok')"
       - name: Verify collector version consistency
