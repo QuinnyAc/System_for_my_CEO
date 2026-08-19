@@ -22,6 +22,8 @@ class AccountCreate(BaseModel):
 class AccountRead(AccountCreate):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    group_id: UUID | None = None
+    baseline_at: datetime | None = None
     created_at: datetime
 
 
