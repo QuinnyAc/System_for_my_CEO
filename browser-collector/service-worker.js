@@ -136,16 +136,27 @@ async function failCurrentTask(reason) {
   await schedulePoll(12_000);
 }
 
-async function finishBaselineWait() {
+async function finishAccountWait() {
   const current = await getCurrentTask();
   if (!current) return;
+  const waitingMetrics = Boolean(current.waitingForAccountMetrics);
+  const waitingBaseline = Boolean(current.waitingForBaseline);
   await clearCurrentTask(current, true);
   await chrome.storage.local.set({
     lastUploadAt: new Date().toISOString(),
-    lastUploadStatus: "success",
-    lastUploadMessage: "账号作品列表本次未完全加载，后台会按计划自动重试"
+    lastUploadStatus: waitingMetrics ? "warning" : "success",
+    lastUploadMessage: waitingMetrics
+      ? "账号作品列表已处理，但本次未读取到公开粉丝/作品指标；后台会自动重试"
+      : waitingBaseline
+        ? "账号数据已读取，但作品列表本次未完全加载；后台会自动重试"
+        : "账号任务等待结束"
   });
   await schedulePoll(6_000);
+}
+
+function payloadHasAccountMetrics(payload) {
+  const metrics = payload?.metrics || {};
+  return [metrics.followers, metrics.account_views, metrics.content_count].some((value) => Number.isFinite(value));
 }
 
 async function pollQueue() {
@@ -182,6 +193,8 @@ async function pollQueue() {
         url: task.url,
         platform: task.platform,
         waitingForBaseline: false,
+        waitingForAccountMetrics: false,
+        accountMetricsReceived: false,
         startedAt: new Date().toISOString()
       };
       await chrome.storage.local.set({ [CURRENT_TASK_KEY]: queueState });
@@ -247,21 +260,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         body: JSON.stringify(payload)
       });
 
-      if (payload.page_type === "account" && !result?.baseline_ready) {
-        await chrome.storage.local.set({
-          [CURRENT_TASK_KEY]: { ...current, waitingForBaseline: true },
-          lastUploadAt: new Date().toISOString(),
-          lastUploadStatus: "running",
-          lastUploadMessage: "账号数据已读取，继续等待作品列表完成加载"
-        });
-        await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + 45_000 });
-        sendResponse({ ok: true, result, waiting: true });
-        return;
-      }
+      if (payload.page_type === "account") {
+        const accountMetricsReceived = Boolean(current.accountMetricsReceived || payloadHasAccountMetrics(payload));
+        const waitingForBaseline = !result?.baseline_ready;
+        const waitingForAccountMetrics = !accountMetricsReceived;
 
-      if (payload.page_type === "account" && result?.baseline_ready) {
+        if (waitingForBaseline || waitingForAccountMetrics) {
+          await chrome.storage.local.set({
+            [CURRENT_TASK_KEY]: {
+              ...current,
+              waitingForBaseline,
+              waitingForAccountMetrics,
+              accountMetricsReceived
+            },
+            lastUploadAt: new Date().toISOString(),
+            lastUploadStatus: "running",
+            lastUploadMessage: waitingForBaseline && waitingForAccountMetrics
+              ? "继续等待账号指标和作品列表完成加载"
+              : waitingForAccountMetrics
+                ? "作品列表已处理，继续等待粉丝/作品指标"
+                : "账号指标已读取，继续等待作品列表完成加载"
+          });
+          await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + 45_000 });
+          sendResponse({ ok: true, result, waiting: true });
+          return;
+        }
+
         await clearLegacyBaseline(current.url);
       }
+
       await chrome.storage.local.set({
         lastUploadAt: new Date().toISOString(),
         lastUploadStatus: "success",
@@ -291,7 +318,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     pollQueue().catch(() => null);
   } else if (alarm.name === TIMEOUT_ALARM) {
     getCurrentTask().then((current) => {
-      if (current?.waitingForBaseline) return finishBaselineWait();
+      if (current?.waitingForBaseline || current?.waitingForAccountMetrics) return finishAccountWait();
       return failCurrentTask("页面在 75 秒内没有读取到公开数据");
     }).catch(() => null);
   }
