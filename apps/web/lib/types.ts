@@ -2,10 +2,12 @@ export type Platform = { id: string; slug: string; name: string };
 export type SocialAccount = {
   id: string;
   platform_id: string;
+  group_id: string | null;
   name: string;
   handle: string | null;
   external_id: string | null;
   profile_url: string | null;
+  baseline_at: string | null;
   created_at: string;
 };
 export type AccountMetric = {
