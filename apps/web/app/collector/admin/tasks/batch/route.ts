@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const collectorTargets = Array.from(new Set([
-  (process.env.COLLECTOR_INTERNAL_URL || "http://collector:8200").replace(/\/$/, ""),
-  (process.env.COLLECTOR_HOST_URL || "http://host.docker.internal:8200").replace(/\/$/, ""),
-]));
+const apiTarget = (process.env.API_INTERNAL_URL || "http://api:8100").replace(/\/$/, "");
 
 export const dynamic = "force-dynamic";
 
@@ -45,23 +42,21 @@ function profileBase(value: string) {
 }
 
 async function collectorRequest(path: string, cookie: string, init?: RequestInit) {
-  const failures: string[] = [];
-  for (const target of collectorTargets) {
-    try {
-      return await fetch(`${target}${path}`, {
-        ...init,
-        headers: {
-          ...(init?.headers || {}),
-          cookie,
-        },
-        cache: "no-store",
-        signal: AbortSignal.timeout(15_000),
-      });
-    } catch (error) {
-      failures.push(`${target}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  try {
+    return await fetch(`${apiTarget}/collector${path}`, {
+      ...init,
+      headers: {
+        ...(init?.headers || {}),
+        cookie,
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    throw new Error(
+      `主 API Collector 无法连接：${error instanceof Error ? error.message : String(error)}`,
+    );
   }
-  throw new Error(`无法连接 Collector（${failures.join("；")}）`);
 }
 
 export async function POST(request: NextRequest) {
