@@ -16,18 +16,32 @@ class Platform(Base):
     name: Mapped[str] = mapped_column(String(64))
 
 
+class AccountGroup(Base):
+    __tablename__ = "account_groups"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(160))
+    name_key: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    accounts: Mapped[list["SocialAccount"]] = relationship(back_populates="group")
+
+
 class SocialAccount(Base):
     __tablename__ = "social_accounts"
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     platform_id: Mapped[UUID] = mapped_column(ForeignKey("platforms.id", ondelete="RESTRICT"), index=True)
+    group_id: Mapped[UUID | None] = mapped_column(ForeignKey("account_groups.id", ondelete="SET NULL"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(160))
     handle: Mapped[str | None] = mapped_column(String(160), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     profile_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     platform: Mapped[Platform] = relationship()
+    group: Mapped[AccountGroup | None] = relationship(back_populates="accounts")
     metrics: Mapped[list["AccountMetricSnapshot"]] = relationship(cascade="all, delete-orphan")
     content: Mapped[list["PublishedContent"]] = relationship(cascade="all, delete-orphan")
     connection: Mapped["PlatformConnection | None"] = relationship(
