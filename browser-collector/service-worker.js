@@ -59,15 +59,6 @@ function legacyBaselineKey(feedUrl) {
   return `${LEGACY_BASELINE_PREFIX}${canonicalUrl(feedUrl)}`;
 }
 
-async function legacySeenUrls(feedUrl) {
-  const key = legacyBaselineKey(feedUrl);
-  const stored = await chrome.storage.local.get(key);
-  const state = stored[key];
-  if (!state) return [];
-  const seen = Array.isArray(state.seen) ? state.seen : Array.isArray(state.baseline) ? state.baseline : [];
-  return [...new Set(seen.map(canonicalUrl).filter(Boolean))].slice(0, 240);
-}
-
 async function clearLegacyBaseline(feedUrl) {
   await chrome.storage.local.remove(legacyBaselineKey(feedUrl));
 }
@@ -242,12 +233,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
-    const previousSeen = message.payload?.page_type === "account"
-      ? await legacySeenUrls(current.url)
-      : [];
     const payload = {
       ...message.payload,
-      previous_seen_urls: previousSeen,
+      // Server-side baseline state is authoritative. Never migrate legacy
+      // browser seen-lists into a newly registered account, because doing so
+      // can misclassify pre-registration history as new business content.
+      previous_seen_urls: [],
       machine_name: cfg.machineName || "",
       collector_version: chrome.runtime.getManifest().version,
       task_id: current.taskId
