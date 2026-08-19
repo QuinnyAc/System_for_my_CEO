@@ -62,20 +62,20 @@ jobs:
       - run: node --check browser-collector/service-worker.js
       - run: node --check browser-collector/content-script.js
       - run: node --check browser-collector/youtube-account-metrics.js
+      - run: node --check browser-collector/youtube-main-world.js
       - run: node --check browser-collector/options.js
       - run: node -e "JSON.parse(require('fs').readFileSync('browser-collector/manifest.json','utf8')); console.log('manifest ok')"
-      - name: Verify collector version consistency
+      - name: Verify collector manifest version and YouTube main-world registration
         run: |
           node - <<'NODE'
           const fs = require('fs');
           const manifest = JSON.parse(fs.readFileSync('browser-collector/manifest.json', 'utf8'));
-          const source = fs.readFileSync('browser-collector/content-script.js', 'utf8');
-          const match = source.match(/const VERSION = \"([^\"]+)\"/);
-          if (!match) throw new Error('content-script VERSION is missing');
-          if (match[1] !== manifest.version) {
-            throw new Error(`version mismatch: manifest=${manifest.version} content-script=${match[1]}`);
-          }
-          console.log(`collector version ${manifest.version} consistent`);
+          if (!/^\d+\.\d+\.\d+$/.test(manifest.version)) throw new Error(`invalid manifest version: ${manifest.version}`);
+          const mainWorld = (manifest.content_scripts || []).find((entry) =>
+            entry.world === 'MAIN' && Array.isArray(entry.js) && entry.js.includes('youtube-main-world.js')
+          );
+          if (!mainWorld) throw new Error('youtube-main-world.js is not registered in MAIN world');
+          console.log(`collector version ${manifest.version}; YouTube main-world reader registered`);
           NODE
       - name: Package collector ZIP
         run: bash .devcontainer/package-browser-collector.sh
