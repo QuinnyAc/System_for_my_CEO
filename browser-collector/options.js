@@ -11,6 +11,12 @@ function show(message, kind = "") {
   statusBox.className = `status ${kind}`.trim();
 }
 
+function statusKind(status) {
+  if (status === "success") return "ok";
+  if (status === "error") return "error";
+  return "";
+}
+
 async function load() {
   const cfg = await chrome.storage.local.get(DEFAULTS);
   enabled.checked = cfg.enabled;
@@ -19,8 +25,10 @@ async function load() {
   machineName.value = cfg.machineName;
 
   if (cfg.lastUploadAt) {
-    const kind = cfg.lastUploadStatus === "success" ? "ok" : cfg.lastUploadStatus === "running" ? "" : "error";
-    show(`最近状态：${new Date(cfg.lastUploadAt).toLocaleString()}\n${cfg.lastUploadStatus}\n${cfg.lastUploadMessage || ""}`, kind);
+    show(
+      `最近状态：${new Date(cfg.lastUploadAt).toLocaleString()}\n${cfg.lastUploadStatus}\n${cfg.lastUploadMessage || ""}`,
+      statusKind(cfg.lastUploadStatus)
+    );
   } else {
     show("尚无后台读取记录");
   }
@@ -72,9 +80,8 @@ async function test() {
       const detail = await response.text();
       if (!response.ok) throw new Error(`${response.status} ${detail.slice(0, 160)}`);
     }
-    const info = await health.json().catch(() => ({}));
-    const version = info.version ? `\nCollector ${info.version}` : "";
-    show(`连接成功。后台自动读取已启用。${version}`, "ok");
+    const extensionVersion = chrome.runtime.getManifest().version;
+    show(`连接成功。后台自动读取已启用。\n扩展版本 ${extensionVersion}`, "ok");
     await chrome.runtime.sendMessage({ type: "RUN_QUEUE" }).catch(() => null);
   } catch (error) {
     show(`连接失败：${error instanceof Error ? error.message : String(error)}`, "error");
