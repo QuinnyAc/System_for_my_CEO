@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app import collector_app
-from app.main import app
+from app.runtime_app import app
 
 
 def test_embedded_collector_health() -> None:
