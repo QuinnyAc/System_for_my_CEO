@@ -44,7 +44,21 @@ wait_for_url "http://localhost:3100/collector/health" "Collector web proxy"
 if [[ -n "${CODESPACE_NAME:-}" ]]; then
   PORT_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
   if command -v gh >/dev/null 2>&1; then
-    gh codespace ports visibility 3100:public -c "${CODESPACE_NAME}" >/dev/null 2>&1 || true
+    echo "Ensuring Codespace port 3100 is public for the Chrome collector..."
+    if ! gh codespace ports visibility 3100:public -c "${CODESPACE_NAME}" >/dev/null 2>&1; then
+      echo "WARNING: Could not set port 3100 to public automatically." >&2
+      echo "Run: gh codespace ports visibility 3100:public -c ${CODESPACE_NAME}" >&2
+    fi
+
+    VISIBILITY="$(gh codespace ports -c "${CODESPACE_NAME}" --json sourcePort,visibility --jq '.[] | select(.sourcePort==3100) | .visibility' 2>/dev/null | head -n1 || true)"
+    if [[ "$VISIBILITY" == "public" ]]; then
+      echo "Codespace port 3100 visibility: public"
+    else
+      echo "WARNING: Codespace port 3100 visibility is '${VISIBILITY:-unknown}'." >&2
+      echo "The Chrome extension cannot reach a private Codespace forwarding URL without GitHub authentication." >&2
+      echo "Set port 3100 to Public from the PORTS panel, or run:" >&2
+      echo "  gh codespace ports visibility 3100:public -c ${CODESPACE_NAME}" >&2
+    fi
   fi
   WEB_URL="https://${CODESPACE_NAME}-3100.${PORT_DOMAIN}"
 else
