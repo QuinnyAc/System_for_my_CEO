@@ -31,7 +31,7 @@
       "matches": [
         "https://*.youtube.com/*"
       ],
-      "js": ["youtube-account-metrics.js"],
+      "js": ["youtube-account-metrics.js", "youtube-followers-fallback.js"],
       "run_at": "document_start"
     },
     {
