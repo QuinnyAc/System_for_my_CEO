@@ -18,6 +18,7 @@ node --check browser-collector/service-worker-entry.js >/dev/null
 node --check browser-collector/content-script.js >/dev/null
 node --check browser-collector/youtube-account-metrics.js >/dev/null
 node --check browser-collector/youtube-main-world.js >/dev/null
+node --check browser-collector/youtube-followers-fallback.js >/dev/null
 node --check browser-collector/options.js >/dev/null
 node browser-collector/tests/youtube-followers-completion-guard.test.js
 
@@ -38,6 +39,12 @@ const mainWorld = (manifest.content_scripts || []).find((entry) =>
   entry.world === 'MAIN' && Array.isArray(entry.js) && entry.js.includes('youtube-main-world.js')
 );
 if (!mainWorld) throw new Error('youtube-main-world.js is not registered in MAIN world');
+const youtubeIsolated = (manifest.content_scripts || []).find((entry) =>
+  !entry.world && Array.isArray(entry.js) && entry.js.includes('youtube-account-metrics.js')
+);
+if (!youtubeIsolated || !youtubeIsolated.js.includes('youtube-followers-fallback.js')) {
+  throw new Error('youtube-followers-fallback.js is not registered with the YouTube account collector');
+}
 if (manifest.background?.service_worker !== 'service-worker-entry.js') {
   throw new Error(`Unexpected background service worker: ${manifest.background?.service_worker || 'missing'}`);
 }
