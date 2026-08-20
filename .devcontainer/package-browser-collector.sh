@@ -14,10 +14,12 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 node --check browser-collector/service-worker.js >/dev/null
+node --check browser-collector/service-worker-entry.js >/dev/null
 node --check browser-collector/content-script.js >/dev/null
 node --check browser-collector/youtube-account-metrics.js >/dev/null
 node --check browser-collector/youtube-main-world.js >/dev/null
 node --check browser-collector/options.js >/dev/null
+node browser-collector/tests/youtube-followers-completion-guard.test.js
 
 MANIFEST_VERSION="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('browser-collector/manifest.json','utf8')).version)")"
 node - <<'NODE'
@@ -36,6 +38,9 @@ const mainWorld = (manifest.content_scripts || []).find((entry) =>
   entry.world === 'MAIN' && Array.isArray(entry.js) && entry.js.includes('youtube-main-world.js')
 );
 if (!mainWorld) throw new Error('youtube-main-world.js is not registered in MAIN world');
+if (manifest.background?.service_worker !== 'service-worker-entry.js') {
+  throw new Error(`Unexpected background service worker: ${manifest.background?.service_worker || 'missing'}`);
+}
 NODE
 
 OUTPUT="media-ops-public-collector.zip"
