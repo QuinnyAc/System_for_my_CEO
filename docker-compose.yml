@@ -73,7 +73,7 @@ services:
     volumes:
       - ./apps/web:/app
       - media_ops_hub_web_node_modules:/app/node_modules
-    command: npm run dev -- --port 3100
+    command: npm run start
 
 volumes:
   media_ops_hub_postgres:
