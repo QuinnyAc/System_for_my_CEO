@@ -6,7 +6,8 @@
       "version": "latest",
       "moby": true,
       "dockerDashComposeVersion": "latest"
-    }
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "forwardPorts": [3100, 8100],
   "portsAttributes": {
