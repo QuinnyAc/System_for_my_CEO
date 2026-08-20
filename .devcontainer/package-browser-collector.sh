@@ -8,22 +8,38 @@ if ! command -v zip >/dev/null 2>&1; then
   echo "zip command is not installed in this Codespace." >&2
   exit 1
 fi
-if ! command -v node >/dev/null 2>&1; then
-  echo "node is not installed in this Codespace." >&2
+
+if command -v node >/dev/null 2>&1; then
+  run_node() {
+    node "$@"
+  }
+  NODE_RUNTIME="local Node"
+elif command -v docker >/dev/null 2>&1; then
+  run_node() {
+    docker run --rm -i \
+      -v "$ROOT:/workspace" \
+      -w /workspace \
+      node:22-alpine node "$@"
+  }
+  NODE_RUNTIME="Docker Node 22"
+else
+  echo "Neither node nor docker is available; cannot validate the browser collector." >&2
   exit 1
 fi
 
-node --check browser-collector/service-worker.js >/dev/null
-node --check browser-collector/service-worker-entry.js >/dev/null
-node --check browser-collector/content-script.js >/dev/null
-node --check browser-collector/youtube-account-metrics.js >/dev/null
-node --check browser-collector/youtube-main-world.js >/dev/null
-node --check browser-collector/youtube-followers-fallback.js >/dev/null
-node --check browser-collector/options.js >/dev/null
-node browser-collector/tests/youtube-followers-completion-guard.test.js
+echo "Collector validation runtime: $NODE_RUNTIME"
 
-MANIFEST_VERSION="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('browser-collector/manifest.json','utf8')).version)")"
-node - <<'NODE'
+run_node --check browser-collector/service-worker.js >/dev/null
+run_node --check browser-collector/service-worker-entry.js >/dev/null
+run_node --check browser-collector/content-script.js >/dev/null
+run_node --check browser-collector/youtube-account-metrics.js >/dev/null
+run_node --check browser-collector/youtube-main-world.js >/dev/null
+run_node --check browser-collector/youtube-followers-fallback.js >/dev/null
+run_node --check browser-collector/options.js >/dev/null
+run_node browser-collector/tests/youtube-followers-completion-guard.test.js
+
+MANIFEST_VERSION="$(run_node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('browser-collector/manifest.json','utf8')).version)")"
+run_node - <<'NODE'
 const fs = require('fs');
 const manifest = JSON.parse(fs.readFileSync('browser-collector/manifest.json', 'utf8'));
 if (!/^\d+\.\d+\.\d+$/.test(manifest.version)) {
